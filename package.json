@@ -1,0 +1,18 @@
+{
+  "name": "pagecut-pdf-tool",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "pdf-lib": "^1.17.1",
+    "qpdf-run": "^0.2.1"
+  },
+  "devDependencies": {
+    "vite": "^7.1.3"
+  }
+}

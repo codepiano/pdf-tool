@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f6f3ed" />
+    <title>页裁 - 本地 PDF 页码工具</title>
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <a class="brand" href="/" aria-label="页裁首页"><span class="brand-mark">P</span><span>页裁</span></a>
+        <span class="privacy-note">仅在此设备处理，不会上传文件</span>
+      </header>
+
+      <section class="hero" aria-labelledby="page-title">
+        <p class="eyebrow">PDF PAGE TOOL</p>
+        <h1 id="page-title">按页整理一本书</h1>
+        <p>提取需要的章节、删除多余页面，或生成一份不带使用限制的副本。文件始终留在你的电脑里。</p>
+      </section>
+
+      <section class="workspace" aria-live="polite">
+        <div class="upload-card" id="upload-card">
+          <input id="file-input" type="file" accept="application/pdf,.pdf" hidden />
+          <div class="upload-icon" aria-hidden="true">↓</div>
+          <h2>拖拽 PDF 到这里</h2>
+          <p>或从电脑中选择一本书</p>
+          <button class="button secondary" id="browse-button" type="button">选择 PDF 文件</button>
+          <small>支持单个 PDF 文件</small>
+        </div>
+
+        <div class="document-card hidden" id="document-card">
+          <div class="file-summary">
+            <div class="pdf-badge">PDF</div>
+            <div class="file-details"><strong id="file-name"></strong><span id="file-meta"></span></div>
+            <button class="icon-button" id="replace-button" type="button" aria-label="更换文件" title="更换文件">↻</button>
+          </div>
+
+          <div class="operation-grid" role="tablist" aria-label="操作类型">
+            <button class="operation active" data-operation="extract" type="button" role="tab" aria-selected="true">
+              <span class="operation-number">01</span><span><strong>提取页面</strong><small>只保留指定页，生成新 PDF</small></span>
+            </button>
+            <button class="operation" data-operation="delete" type="button" role="tab" aria-selected="false">
+              <span class="operation-number">02</span><span><strong>删除页面</strong><small>移除指定页，保留其余内容</small></span>
+            </button>
+            <button class="operation" data-operation="unlock" type="button" role="tab" aria-selected="false">
+              <span class="operation-number">03</span><span><strong>解除使用限制</strong><small>生成不限制编辑、提取和打印的副本</small></span>
+            </button>
+          </div>
+
+          <div class="editor-area" id="range-editor">
+            <div>
+              <label id="range-label" for="page-range">要提取哪些页？</label>
+              <div class="range-input-wrap">
+                <input id="page-range" type="text" inputmode="text" autocomplete="off" placeholder="例如 1, 3-5, 8" aria-describedby="range-help range-error" />
+                <span class="page-unit">页</span>
+              </div>
+              <p id="range-help" class="input-help">用英文逗号分隔；连续页可用连字符，例如 <code>1, 3-5, 8</code>。</p>
+              <p id="range-error" class="input-error hidden" role="alert"></p>
+            </div>
+            <aside class="page-context"><span>共 <b id="total-pages">0</b> 页</span><button type="button" id="select-all-button">全部选择</button></aside>
+          </div>
+
+          <div class="result-bar">
+            <p id="selection-summary">输入页码以继续</p>
+            <button class="button primary" id="process-button" type="button" disabled>生成新 PDF <span aria-hidden="true">→</span></button>
+          </div>
+        </div>
+      </section>
+
+      <section class="how-it-works" aria-label="使用说明">
+        <div><span>01</span><p>拖入你的 PDF</p></div><div><span>02</span><p>输入需要处理的页码</p></div><div><span>03</span><p>下载新的 PDF 文件</p></div>
+      </section>
+    </main>
+    <div class="toast hidden" id="toast" role="status"></div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
