@@ -16,7 +16,7 @@
       <section class="hero" aria-labelledby="page-title">
         <p class="eyebrow">PDF PAGE TOOL</p>
         <h1 id="page-title">按页整理一本书</h1>
-        <p>提取需要的章节、删除多余页面，或生成一份不带使用限制的副本。文件始终留在你的电脑里。</p>
+        <p>提取需要的章节、删除多余页面、切开扫描的双页，或生成一份不带使用限制的副本。文件始终留在你的电脑里。</p>
       </section>
 
       <section class="workspace" aria-live="polite">
@@ -46,6 +46,9 @@
             <button class="operation" data-operation="unlock" type="button" role="tab" aria-selected="false">
               <span class="operation-number">03</span><span><strong>解除使用限制</strong><small>生成不限制编辑、提取和打印的副本</small></span>
             </button>
+            <button class="operation" data-operation="split" type="button" role="tab" aria-selected="false">
+              <span class="operation-number">04</span><span><strong>切开双页扫描</strong><small>把每一张横向双页切成左右两页</small></span>
+            </button>
           </div>
 
           <div class="editor-area" id="range-editor">
@@ -59,6 +62,15 @@
               <p id="range-error" class="input-error hidden" role="alert"></p>
             </div>
             <aside class="page-context"><span>共 <b id="total-pages">0</b> 页</span><button type="button" id="select-all-button">全部选择</button></aside>
+          </div>
+
+          <div class="split-notice hidden" id="split-notice">
+            <span class="split-glyph" aria-hidden="true">▯|▯</span>
+            <div class="split-copy"><p><strong>从左到右切开</strong><small>每个 PDF 阅读器页面会生成两页：先左页，再右页。适合书籍双页扫描；输出会转为图像型 PDF。</small></p>
+              <label class="deskew-control" for="deskew-angle"><span>校正文字倾斜</span><output id="deskew-value" for="deskew-angle">0°</output></label>
+              <div class="angle-control"><button class="angle-nudge" id="deskew-left" type="button" aria-label="向左校正 0.1 度">−</button><input id="deskew-angle" type="range" min="-3" max="3" step="0.1" value="0" aria-label="校正文字倾斜角度" /><button class="angle-nudge" id="deskew-right" type="button" aria-label="向右校正 0.1 度">+</button></div>
+              <small class="deskew-help">将文字调到水平：向左歪就往右调，向右歪就往左调。会先校正，再切开。</small>
+            </div>
           </div>
 
           <div class="result-bar">
