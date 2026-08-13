@@ -49,6 +49,9 @@
             <button class="operation" data-operation="split" type="button" role="tab" aria-selected="false">
               <span class="operation-number">04</span><span><strong>切开双页扫描</strong><small>把每一张横向双页切成左右两页</small></span>
             </button>
+            <button class="operation" data-operation="reorder" type="button" role="tab" aria-selected="false">
+              <span class="operation-number">05</span><span><strong>调整页面顺序</strong><small>拖拽页面重新排序，或将整本书倒序</small></span>
+            </button>
           </div>
 
           <div class="editor-area" id="range-editor">
@@ -75,8 +78,9 @@
 
           <section class="page-browser hidden" id="page-browser" aria-labelledby="page-browser-title">
             <header class="page-browser-header">
-              <div><h3 id="page-browser-title">页面预览</h3><p>点击选择页面，按住 Shift 可连续选择</p></div>
-              <div class="page-browser-actions"><span id="selected-count">已选 0 页</span><button id="clear-selection-button" type="button">清除</button></div>
+              <div><h3 id="page-browser-title">页面预览</h3><p id="page-browser-help">点击选择页面，按住 Shift 可连续选择</p></div>
+              <div class="page-browser-actions" id="selection-actions"><span id="selected-count">已选 0 页</span><button id="clear-selection-button" type="button">清除</button></div>
+              <div class="page-browser-actions hidden" id="reorder-actions"><button id="reverse-pages-button" type="button">全部倒序</button><button id="reset-order-button" type="button">恢复原顺序</button></div>
             </header>
             <div class="thumbnail-grid" id="thumbnail-grid" role="group" aria-label="PDF 页面缩略图"></div>
           </section>

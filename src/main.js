@@ -1,5 +1,6 @@
 import { createPageSubset, openPdfRenderer, readPdfFile, renderPageThumbnail } from './pdf/document-engine.js';
 import { formatPageRange, parsePageRange } from './pdf/page-range.js';
+import { movePageBefore } from './pdf/page-order.js';
 import { splitDoublePages } from './pdf/scan-processing.js';
 import './style.css';
 
@@ -18,6 +19,10 @@ const splitNotice = $('#split-notice');
 const pageBrowser = $('#page-browser');
 const thumbnailGrid = $('#thumbnail-grid');
 const selectedCount = $('#selected-count');
+const pageBrowserTitle = $('#page-browser-title');
+const pageBrowserHelp = $('#page-browser-help');
+const selectionActions = $('#selection-actions');
+const reorderActions = $('#reorder-actions');
 const deskewAngle = $('#deskew-angle');
 const deskewValue = $('#deskew-value');
 const selectionSummary = $('#selection-summary');
@@ -31,7 +36,9 @@ let pageCount = 0;
 let operation = 'extract';
 let wasRestricted = false;
 let selectedPages = new Set();
+let pageOrder = [];
 let selectionAnchor = null;
+let draggedPage = null;
 let rendererHandle = null;
 let thumbnailObserver = null;
 let documentGeneration = 0;
@@ -42,6 +49,11 @@ function formatSize(bytes) {
 }
 
 function updateSelection() {
+  if (operation === 'reorder') {
+    processButton.disabled = false;
+    selectionSummary.textContent = `将按当前顺序生成 ${pageOrder.length} 页的新 PDF`;
+    return;
+  }
   if (operation === 'split') {
     rangeError.classList.add('hidden');
     processButton.disabled = false;
@@ -73,10 +85,22 @@ function updateSelection() {
 function updateThumbnailSelection() {
   thumbnailGrid.querySelectorAll('.page-thumbnail').forEach((thumbnail) => {
     const selected = selectedPages.has(Number(thumbnail.dataset.page));
-    thumbnail.classList.toggle('selected', selected);
+    thumbnail.classList.toggle('selected', selected && operation !== 'reorder');
     thumbnail.setAttribute('aria-pressed', String(selected));
+    thumbnail.draggable = operation === 'reorder';
   });
   selectedCount.textContent = `已选 ${selectedPages.size} 页`;
+}
+
+function applyPageOrder() {
+  const thumbnails = new Map([...thumbnailGrid.querySelectorAll('.page-thumbnail')].map((thumbnail) => [Number(thumbnail.dataset.page), thumbnail]));
+  pageOrder.forEach((page) => thumbnailGrid.appendChild(thumbnails.get(page)));
+  updateSelection();
+}
+
+function reorderPageBefore(sourcePage, targetPage) {
+  pageOrder = movePageBefore(pageOrder, sourcePage, targetPage);
+  applyPageOrder();
 }
 
 function syncSelectionFromInput() {
@@ -138,6 +162,28 @@ async function buildThumbnailBrowser(bytes) {
     thumbnail.setAttribute('aria-pressed', 'false');
     thumbnail.innerHTML = `<span class="thumbnail-paper"><span class="thumbnail-placeholder"></span></span><span class="thumbnail-number"><span>PAGE ${page}</span><span class="selection-mark">✓</span></span>`;
     thumbnail.addEventListener('click', (event) => toggleThumbnailPage(page, event.shiftKey));
+    thumbnail.addEventListener('dragstart', (event) => {
+      if (operation !== 'reorder') return event.preventDefault();
+      draggedPage = page;
+      thumbnail.classList.add('dragging');
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', String(page));
+    });
+    thumbnail.addEventListener('dragover', (event) => {
+      if (operation !== 'reorder') return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'move';
+    });
+    thumbnail.addEventListener('drop', (event) => {
+      if (operation !== 'reorder') return;
+      event.preventDefault();
+      const sourcePage = draggedPage ?? Number(event.dataTransfer.getData('text/plain'));
+      reorderPageBefore(sourcePage, page);
+    });
+    thumbnail.addEventListener('dragend', () => {
+      draggedPage = null;
+      thumbnail.classList.remove('dragging');
+    });
     fragment.appendChild(thumbnail);
   }
   thumbnailGrid.replaceChildren(fragment);
@@ -158,9 +204,14 @@ function setOperation(nextOperation) {
     button.classList.toggle('active', active);
     button.setAttribute('aria-selected', String(active));
   });
-  const usesPages = operation === 'extract' || operation === 'delete';
-  rangeEditor.classList.toggle('hidden', !usesPages);
-  pageBrowser.classList.toggle('hidden', !usesPages);
+  const usesPageSelection = operation === 'extract' || operation === 'delete';
+  const usesPageBrowser = usesPageSelection || operation === 'reorder';
+  rangeEditor.classList.toggle('hidden', !usesPageSelection);
+  pageBrowser.classList.toggle('hidden', !usesPageBrowser);
+  selectionActions.classList.toggle('hidden', !usesPageSelection);
+  reorderActions.classList.toggle('hidden', operation !== 'reorder');
+  pageBrowserTitle.textContent = operation === 'reorder' ? '调整页面顺序' : '页面预览';
+  pageBrowserHelp.textContent = operation === 'reorder' ? '拖拽页面卡片改变顺序' : '点击选择页面，按住 Shift 可连续选择';
   splitNotice.classList.toggle('hidden', operation !== 'split');
   rangeLabel.textContent = operation === 'extract' ? '要提取哪些页？' : '要删除哪些页？';
   processButton.innerHTML = operation === 'extract'
@@ -169,7 +220,10 @@ function setOperation(nextOperation) {
       ? '删除并生成新 PDF <span aria-hidden="true">→</span>'
       : operation === 'unlock'
         ? '生成无使用限制副本 <span aria-hidden="true">→</span>'
-        : '切开并生成新 PDF <span aria-hidden="true">→</span>';
+        : operation === 'split'
+          ? '切开并生成新 PDF <span aria-hidden="true">→</span>'
+          : '按当前顺序生成 <span aria-hidden="true">→</span>';
+  updateThumbnailSelection();
   updateSelection();
 }
 
@@ -206,6 +260,7 @@ async function loadFile(file) {
     documentCard.classList.remove('hidden');
     pageRange.value = '';
     selectedPages = new Set();
+    pageOrder = Array.from({ length: pageCount }, (_, index) => index + 1);
     selectionAnchor = null;
     await buildThumbnailBrowser(sourceBytes);
     setOperation(wasRestricted ? 'unlock' : 'extract');
@@ -225,7 +280,9 @@ async function generatePdf() {
     ? pages.map((page) => page - 1)
     : operation === 'delete'
       ? Array.from({ length: pageCount }, (_, index) => index).filter((index) => !selected.has(index + 1))
-      : Array.from({ length: pageCount }, (_, index) => index);
+      : operation === 'reorder'
+        ? pageOrder.map((page) => page - 1)
+        : Array.from({ length: pageCount }, (_, index) => index);
   if (!indices.length) return;
   processButton.disabled = true;
   processButton.textContent = '正在生成…';
@@ -241,7 +298,7 @@ async function generatePdf() {
       bytes = await createPageSubset(sourceBytes, indices);
     }
     const stem = sourceFile.name.replace(/\.pdf$/i, '');
-    const suffix = operation === 'extract' ? '提取页' : operation === 'delete' ? '已删除页' : operation === 'unlock' ? '无使用限制' : '双页已切开';
+    const suffix = operation === 'extract' ? '提取页' : operation === 'delete' ? '已删除页' : operation === 'unlock' ? '无使用限制' : operation === 'split' ? '双页已切开' : '已排序';
     const blob = new Blob([bytes], { type: 'application/pdf' });
     const url = URL.createObjectURL(blob);
     const link = Object.assign(document.createElement('a'), { href: url, download: `${stem}-${suffix}.pdf` });
@@ -272,4 +329,6 @@ $('#deskew-left').addEventListener('click', () => changeDeskewAngle(-0.1));
 $('#deskew-right').addEventListener('click', () => changeDeskewAngle(0.1));
 selectAllButton.addEventListener('click', () => { selectedPages = new Set(Array.from({ length: pageCount }, (_, index) => index + 1)); syncInputFromSelection(); pageRange.focus(); });
 $('#clear-selection-button').addEventListener('click', () => { selectedPages.clear(); selectionAnchor = null; syncInputFromSelection(); });
+$('#reverse-pages-button').addEventListener('click', () => { pageOrder.reverse(); applyPageOrder(); });
+$('#reset-order-button').addEventListener('click', () => { pageOrder = Array.from({ length: pageCount }, (_, index) => index + 1); applyPageOrder(); });
 processButton.addEventListener('click', generatePdf);
