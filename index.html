@@ -72,7 +72,10 @@
 
           <div class="split-notice hidden" id="split-notice">
             <span class="split-glyph" aria-hidden="true">▯|▯</span>
-            <div class="split-copy"><p><strong>从左到右切开</strong><small>每个 PDF 阅读器页面会生成两页：先左页，再右页。适合书籍双页扫描；输出会转为图像型 PDF。</small></p>
+            <div class="split-copy"><p><strong>只切开选中的双页</strong><small>未选页面会原样保留，适合封面是单页、正文是双页的书籍扫描；切开的页面会转为图像。</small></p>
+              <label class="deskew-control" for="split-position"><span>切割线位置</span><output id="split-position-value" for="split-position">50%</output></label>
+              <input class="wide-range" id="split-position" type="range" min="35" max="65" step="1" value="50" aria-label="切割线位置" />
+              <div class="split-order-row"><span>输出顺序</span><div class="choice-row" role="group" aria-label="切割后的页面顺序"><button class="choice-button active" data-split-order="ltr" type="button" aria-pressed="true">先左后右</button><button class="choice-button" data-split-order="rtl" type="button" aria-pressed="false">先右后左</button></div></div>
               <label class="deskew-control" for="deskew-angle"><span>校正文字倾斜</span><output id="deskew-value" for="deskew-angle">0°</output></label>
               <div class="angle-control"><button class="angle-nudge" id="deskew-left" type="button" aria-label="向左校正 0.1 度">−</button><input id="deskew-angle" type="range" min="-3" max="3" step="0.1" value="0" aria-label="校正文字倾斜角度" /><button class="angle-nudge" id="deskew-right" type="button" aria-label="向右校正 0.1 度">+</button></div>
               <small class="deskew-help">将文字调到水平：向左歪就往右调，向右歪就往左调。会先校正，再切开。</small>

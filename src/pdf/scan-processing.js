@@ -16,13 +16,21 @@ function rotateCanvas(canvas, angle) {
   return rotated;
 }
 
-export async function splitDoublePages(bytes, angle, onProgress = () => {}) {
+export async function splitDoublePages(bytes, options = {}, onProgress = () => {}) {
+  const { angle = 0, selectedPages = [], splitRatio = 0.5, order = 'ltr' } = options;
+  const selected = new Set(selectedPages);
   const renderer = openPdfRenderer(bytes);
   const source = await renderer.documentPromise;
+  const vectorSource = await PDFDocument.load(bytes);
   const output = await PDFDocument.create();
   try {
     for (let index = 1; index <= source.numPages; index += 1) {
       onProgress(index, source.numPages);
+      if (!selected.has(index)) {
+        const [copiedPage] = await output.copyPages(vectorSource, [index - 1]);
+        output.addPage(copiedPage);
+        continue;
+      }
       const sourcePage = await source.getPage(index);
       const viewport = sourcePage.getViewport({ scale: 2 });
       const canvas = document.createElement('canvas');
@@ -34,18 +42,23 @@ export async function splitDoublePages(bytes, angle, onProgress = () => {}) {
       await sourcePage.render({ canvasContext: context, viewport }).promise;
       const adjustedCanvas = rotateCanvas(canvas, angle);
       const originalViewport = sourcePage.getViewport({ scale: 1 });
-      const scale = adjustedCanvas.height / canvas.height;
-      const halfWidth = Math.floor(adjustedCanvas.width / 2);
-      for (const sourceX of [0, adjustedCanvas.width - halfWidth]) {
+      const pointsPerPixel = originalViewport.height / canvas.height;
+      const splitX = Math.max(1, Math.min(adjustedCanvas.width - 1, Math.round(adjustedCanvas.width * splitRatio)));
+      const parts = [
+        { sourceX: 0, width: splitX },
+        { sourceX: splitX, width: adjustedCanvas.width - splitX },
+      ];
+      if (order === 'rtl') parts.reverse();
+      for (const part of parts) {
         const halfCanvas = document.createElement('canvas');
-        halfCanvas.width = halfWidth;
+        halfCanvas.width = part.width;
         halfCanvas.height = adjustedCanvas.height;
         const halfContext = halfCanvas.getContext('2d', { alpha: false });
         halfContext.fillStyle = '#ffffff';
         halfContext.fillRect(0, 0, halfCanvas.width, halfCanvas.height);
-        halfContext.drawImage(adjustedCanvas, sourceX, 0, halfWidth, adjustedCanvas.height, 0, 0, halfWidth, adjustedCanvas.height);
+        halfContext.drawImage(adjustedCanvas, part.sourceX, 0, part.width, adjustedCanvas.height, 0, 0, part.width, adjustedCanvas.height);
         const image = await output.embedJpg(halfCanvas.toDataURL('image/jpeg', 0.94));
-        const page = output.addPage([(originalViewport.width / 2) * scale, originalViewport.height * scale]);
+        const page = output.addPage([part.width * pointsPerPixel, adjustedCanvas.height * pointsPerPixel]);
         page.drawImage(image, { x: 0, y: 0, width: page.getWidth(), height: page.getHeight() });
       }
       sourcePage.cleanup();
