@@ -1,6 +1,7 @@
 import { createPageSubset, openPdfRenderer, readPdfFile, renderPageThumbnail } from './pdf/document-engine.js';
 import { formatPageRange, parsePageRange } from './pdf/page-range.js';
 import { movePageBefore } from './pdf/page-order.js';
+import { rotatePdfPages } from './pdf/page-transform.js';
 import { splitDoublePages } from './pdf/scan-processing.js';
 import './style.css';
 
@@ -16,6 +17,7 @@ const rangeLabel = $('#range-label');
 const rangeError = $('#range-error');
 const rangeEditor = $('#range-editor');
 const splitNotice = $('#split-notice');
+const rotationPanel = $('#rotation-panel');
 const pageBrowser = $('#page-browser');
 const thumbnailGrid = $('#thumbnail-grid');
 const selectedCount = $('#selected-count');
@@ -39,6 +41,7 @@ let selectedPages = new Set();
 let pageOrder = [];
 let selectionAnchor = null;
 let draggedPage = null;
+let rotationAngle = 90;
 let rendererHandle = null;
 let thumbnailObserver = null;
 let documentGeneration = 0;
@@ -78,7 +81,9 @@ function updateSelection() {
   const unaffected = pageCount - pages.length;
   selectionSummary.textContent = operation === 'extract'
     ? `将生成包含 ${pages.length} 页的新 PDF`
-    : unaffected ? `将删除 ${pages.length} 页，保留 ${unaffected} 页` : '不能删除全部页面';
+    : operation === 'rotate'
+      ? `将把 ${pages.length} 页旋转 ${rotationAngle}°，其余页面保持不变`
+      : unaffected ? `将删除 ${pages.length} 页，保留 ${unaffected} 页` : '不能删除全部页面';
   if (operation === 'delete' && !unaffected) processButton.disabled = true;
 }
 
@@ -88,6 +93,10 @@ function updateThumbnailSelection() {
     thumbnail.classList.toggle('selected', selected && operation !== 'reorder');
     thumbnail.setAttribute('aria-pressed', String(selected));
     thumbnail.draggable = operation === 'reorder';
+    const canvas = thumbnail.querySelector('canvas');
+    if (canvas) canvas.style.transform = operation === 'rotate' && selected
+      ? `rotate(${rotationAngle}deg) scale(${rotationAngle % 180 ? 0.72 : 1})`
+      : '';
   });
   selectedCount.textContent = `已选 ${selectedPages.size} 页`;
 }
@@ -204,7 +213,7 @@ function setOperation(nextOperation) {
     button.classList.toggle('active', active);
     button.setAttribute('aria-selected', String(active));
   });
-  const usesPageSelection = operation === 'extract' || operation === 'delete';
+  const usesPageSelection = operation === 'extract' || operation === 'delete' || operation === 'rotate';
   const usesPageBrowser = usesPageSelection || operation === 'reorder';
   rangeEditor.classList.toggle('hidden', !usesPageSelection);
   pageBrowser.classList.toggle('hidden', !usesPageBrowser);
@@ -213,7 +222,8 @@ function setOperation(nextOperation) {
   pageBrowserTitle.textContent = operation === 'reorder' ? '调整页面顺序' : '页面预览';
   pageBrowserHelp.textContent = operation === 'reorder' ? '拖拽页面卡片改变顺序' : '点击选择页面，按住 Shift 可连续选择';
   splitNotice.classList.toggle('hidden', operation !== 'split');
-  rangeLabel.textContent = operation === 'extract' ? '要提取哪些页？' : '要删除哪些页？';
+  rotationPanel.classList.toggle('hidden', operation !== 'rotate');
+  rangeLabel.textContent = operation === 'extract' ? '要提取哪些页？' : operation === 'rotate' ? '要旋转哪些页？' : '要删除哪些页？';
   processButton.innerHTML = operation === 'extract'
     ? '生成新 PDF <span aria-hidden="true">→</span>'
     : operation === 'delete'
@@ -222,7 +232,9 @@ function setOperation(nextOperation) {
         ? '生成无使用限制副本 <span aria-hidden="true">→</span>'
         : operation === 'split'
           ? '切开并生成新 PDF <span aria-hidden="true">→</span>'
-          : '按当前顺序生成 <span aria-hidden="true">→</span>';
+          : operation === 'rotate'
+            ? '旋转并生成新 PDF <span aria-hidden="true">→</span>'
+            : '按当前顺序生成 <span aria-hidden="true">→</span>';
   updateThumbnailSelection();
   updateSelection();
 }
@@ -273,7 +285,7 @@ async function loadFile(file) {
 
 async function generatePdf() {
   const { pages, error } = parsePageRange(pageRange.value, pageCount);
-  const requiresPages = operation === 'extract' || operation === 'delete';
+  const requiresPages = operation === 'extract' || operation === 'delete' || operation === 'rotate';
   if ((requiresPages && (error || !pages.length)) || !sourceBytes) return;
   const selected = new Set(pages);
   const indices = operation === 'extract'
@@ -294,11 +306,13 @@ async function generatePdf() {
       bytes = await splitDoublePages(sourceBytes, Number(deskewAngle.value), (current, total) => {
         selectionSummary.textContent = `正在切割第 ${current} / ${total} 张双页…`;
       });
+    } else if (operation === 'rotate') {
+      bytes = await rotatePdfPages(sourceBytes, pages, rotationAngle);
     } else {
       bytes = await createPageSubset(sourceBytes, indices);
     }
     const stem = sourceFile.name.replace(/\.pdf$/i, '');
-    const suffix = operation === 'extract' ? '提取页' : operation === 'delete' ? '已删除页' : operation === 'unlock' ? '无使用限制' : operation === 'split' ? '双页已切开' : '已排序';
+    const suffix = operation === 'extract' ? '提取页' : operation === 'delete' ? '已删除页' : operation === 'unlock' ? '无使用限制' : operation === 'split' ? '双页已切开' : operation === 'rotate' ? '已旋转' : '已排序';
     const blob = new Blob([bytes], { type: 'application/pdf' });
     const url = URL.createObjectURL(blob);
     const link = Object.assign(document.createElement('a'), { href: url, download: `${stem}-${suffix}.pdf` });
@@ -323,6 +337,16 @@ uploadCard.addEventListener('drop', (event) => { event.preventDefault(); uploadC
 document.addEventListener('dragover', (event) => event.preventDefault());
 document.addEventListener('drop', (event) => { if (event.target !== uploadCard && !uploadCard.contains(event.target)) loadFile(event.dataTransfer.files[0]); });
 document.querySelectorAll('.operation').forEach((button) => button.addEventListener('click', () => setOperation(button.dataset.operation)));
+document.querySelectorAll('[data-rotation]').forEach((button) => button.addEventListener('click', () => {
+  rotationAngle = Number(button.dataset.rotation);
+  document.querySelectorAll('[data-rotation]').forEach((choice) => {
+    const active = choice === button;
+    choice.classList.toggle('active', active);
+    choice.setAttribute('aria-pressed', String(active));
+  });
+  updateThumbnailSelection();
+  updateSelection();
+}));
 pageRange.addEventListener('input', syncSelectionFromInput);
 deskewAngle.addEventListener('input', () => { deskewValue.textContent = `${Number(deskewAngle.value).toFixed(1).replace('.0', '')}°`; updateSelection(); });
 $('#deskew-left').addEventListener('click', () => changeDeskewAngle(-0.1));

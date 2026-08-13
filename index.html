@@ -52,6 +52,9 @@
             <button class="operation" data-operation="reorder" type="button" role="tab" aria-selected="false">
               <span class="operation-number">05</span><span><strong>调整页面顺序</strong><small>拖拽页面重新排序，或将整本书倒序</small></span>
             </button>
+            <button class="operation" data-operation="rotate" type="button" role="tab" aria-selected="false">
+              <span class="operation-number">06</span><span><strong>旋转页面</strong><small>将指定页面无损旋转 90°、180° 或 270°</small></span>
+            </button>
           </div>
 
           <div class="editor-area" id="range-editor">
@@ -73,6 +76,15 @@
               <label class="deskew-control" for="deskew-angle"><span>校正文字倾斜</span><output id="deskew-value" for="deskew-angle">0°</output></label>
               <div class="angle-control"><button class="angle-nudge" id="deskew-left" type="button" aria-label="向左校正 0.1 度">−</button><input id="deskew-angle" type="range" min="-3" max="3" step="0.1" value="0" aria-label="校正文字倾斜角度" /><button class="angle-nudge" id="deskew-right" type="button" aria-label="向右校正 0.1 度">+</button></div>
               <small class="deskew-help">将文字调到水平：向左歪就往右调，向右歪就往左调。会先校正，再切开。</small>
+            </div>
+          </div>
+
+          <div class="option-panel hidden" id="rotation-panel">
+            <div><strong>旋转角度</strong><small>在下方选择需要旋转的页面</small></div>
+            <div class="choice-row" role="group" aria-label="旋转角度">
+              <button class="choice-button active" data-rotation="90" type="button" aria-pressed="true">90°</button>
+              <button class="choice-button" data-rotation="180" type="button" aria-pressed="false">180°</button>
+              <button class="choice-button" data-rotation="270" type="button" aria-pressed="false">270°</button>
             </div>
           </div>
 
