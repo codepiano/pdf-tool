@@ -2,7 +2,7 @@ import { createPageSubset, openPdfRenderer, protectPdf, readPdfFile, renderPageT
 import { formatPageRange, parsePageRange } from './pdf/page-range.js';
 import { movePageBefore } from './pdf/page-order.js';
 import { rotatePdfPages } from './pdf/page-transform.js';
-import { splitDoublePages } from './pdf/scan-processing.js';
+import { enhanceScannedPages, splitDoublePages } from './pdf/scan-processing.js';
 import './style.css';
 
 const $ = (selector) => document.querySelector(selector);
@@ -22,6 +22,12 @@ const rangeEditor = $('#range-editor');
 const splitNotice = $('#split-notice');
 const rotationPanel = $('#rotation-panel');
 const passwordPanel = $('#password-panel');
+const scanPanel = $('#scan-panel');
+const autoCrop = $('#auto-crop');
+const cropPadding = $('#crop-padding');
+const scanBrightness = $('#scan-brightness');
+const scanContrast = $('#scan-contrast');
+const scanGrayscale = $('#scan-grayscale');
 const newPassword = $('#new-password');
 const confirmPassword = $('#confirm-password');
 const pageBrowser = $('#page-browser');
@@ -92,6 +98,8 @@ function updateSelection() {
   const unaffected = pageCount - pages.length;
   selectionSummary.textContent = operation === 'extract'
     ? `将生成包含 ${pages.length} 页的新 PDF`
+    : operation === 'enhance'
+      ? `将优化 ${pages.length} 个扫描页，其余 ${unaffected} 页原样保留${autoCrop.checked ? '，并逐页裁剪白边' : ''}`
     : operation === 'split'
       ? `将切开 ${pages.length} 页，保留 ${unaffected} 个单页，输出共 ${pageCount + pages.length} 页（${splitOrder === 'ltr' ? '先左后右' : '先右后左'}）`
     : operation === 'rotate'
@@ -226,7 +234,7 @@ function setOperation(nextOperation) {
     button.classList.toggle('active', active);
     button.setAttribute('aria-selected', String(active));
   });
-  const usesPageSelection = operation === 'extract' || operation === 'delete' || operation === 'rotate' || operation === 'split';
+  const usesPageSelection = operation === 'extract' || operation === 'delete' || operation === 'rotate' || operation === 'split' || operation === 'enhance';
   const usesPageBrowser = usesPageSelection || operation === 'reorder';
   rangeEditor.classList.toggle('hidden', !usesPageSelection);
   pageBrowser.classList.toggle('hidden', !usesPageBrowser);
@@ -237,7 +245,8 @@ function setOperation(nextOperation) {
   splitNotice.classList.toggle('hidden', operation !== 'split');
   rotationPanel.classList.toggle('hidden', operation !== 'rotate');
   passwordPanel.classList.toggle('hidden', operation !== 'protect');
-  rangeLabel.textContent = operation === 'extract' ? '要提取哪些页？' : operation === 'rotate' ? '要旋转哪些页？' : operation === 'split' ? '要切开哪些页？' : '要删除哪些页？';
+  scanPanel.classList.toggle('hidden', operation !== 'enhance');
+  rangeLabel.textContent = operation === 'extract' ? '要提取哪些页？' : operation === 'rotate' ? '要旋转哪些页？' : operation === 'split' ? '要切开哪些页？' : operation === 'enhance' ? '要优化哪些扫描页？' : '要删除哪些页？';
   processButton.innerHTML = operation === 'extract'
     ? '生成新 PDF <span aria-hidden="true">→</span>'
     : operation === 'delete'
@@ -250,9 +259,11 @@ function setOperation(nextOperation) {
             ? '旋转并生成新 PDF <span aria-hidden="true">→</span>'
             : operation === 'protect'
               ? '加密并生成新 PDF <span aria-hidden="true">→</span>'
-              : '按当前顺序生成 <span aria-hidden="true">→</span>';
+              : operation === 'enhance'
+                ? '优化并生成新 PDF <span aria-hidden="true">→</span>'
+                : '按当前顺序生成 <span aria-hidden="true">→</span>';
   updateThumbnailSelection();
-  if (operation === 'split' && selectedPages.size === 0) {
+  if ((operation === 'split' || operation === 'enhance') && selectedPages.size === 0) {
     selectedPages = new Set(Array.from({ length: pageCount }, (_, index) => index + 1));
     syncInputFromSelection();
     return;
@@ -315,7 +326,7 @@ async function loadFile(file, password = '') {
 
 async function generatePdf() {
   const { pages, error } = parsePageRange(pageRange.value, pageCount);
-  const requiresPages = operation === 'extract' || operation === 'delete' || operation === 'rotate' || operation === 'split';
+  const requiresPages = operation === 'extract' || operation === 'delete' || operation === 'rotate' || operation === 'split' || operation === 'enhance';
   if ((requiresPages && (error || !pages.length)) || !sourceBytes) return;
   const selected = new Set(pages);
   const indices = operation === 'extract'
@@ -343,13 +354,24 @@ async function generatePdf() {
       }, (current, total) => {
         selectionSummary.textContent = `正在处理第 ${current} / ${total} 个阅读器页面…`;
       });
+    } else if (operation === 'enhance') {
+      bytes = await enhanceScannedPages(sourceBytes, {
+        selectedPages: pages,
+        autoCrop: autoCrop.checked,
+        cropPadding: Number(cropPadding.value) / 100,
+        brightness: Number(scanBrightness.value),
+        contrast: Number(scanContrast.value),
+        grayscale: scanGrayscale.checked,
+      }, (current, total) => {
+        selectionSummary.textContent = `正在优化第 ${current} / ${total} 个阅读器页面…`;
+      });
     } else if (operation === 'rotate') {
       bytes = await rotatePdfPages(sourceBytes, pages, rotationAngle);
     } else {
       bytes = await createPageSubset(sourceBytes, indices);
     }
     const stem = sourceFile.name.replace(/\.pdf$/i, '');
-    const suffix = operation === 'extract' ? '提取页' : operation === 'delete' ? '已删除页' : operation === 'unlock' ? '无使用限制' : operation === 'split' ? '双页已切开' : operation === 'rotate' ? '已旋转' : operation === 'protect' ? '已加密' : '已排序';
+    const suffix = operation === 'extract' ? '提取页' : operation === 'delete' ? '已删除页' : operation === 'unlock' ? '无使用限制' : operation === 'split' ? '双页已切开' : operation === 'rotate' ? '已旋转' : operation === 'protect' ? '已加密' : operation === 'enhance' ? '扫描已优化' : '已排序';
     const blob = new Blob([bytes], { type: 'application/pdf' });
     const url = URL.createObjectURL(blob);
     const link = Object.assign(document.createElement('a'), { href: url, download: `${stem}-${suffix}.pdf` });
@@ -376,6 +398,14 @@ document.addEventListener('drop', (event) => { if (event.target !== uploadCard &
 document.querySelectorAll('.operation').forEach((button) => button.addEventListener('click', () => setOperation(button.dataset.operation)));
 newPassword.addEventListener('input', updateSelection);
 confirmPassword.addEventListener('input', updateSelection);
+function bindScanControl(input, output, formatter = (value) => `${value}%`) {
+  input.addEventListener('input', () => { if (output) output.textContent = formatter(input.value); updateSelection(); });
+}
+bindScanControl(cropPadding, $('#crop-padding-value'));
+bindScanControl(scanBrightness, $('#scan-brightness-value'));
+bindScanControl(scanContrast, $('#scan-contrast-value'));
+bindScanControl(autoCrop);
+bindScanControl(scanGrayscale);
 $('#open-with-password').addEventListener('click', () => { if (pendingFile && openPassword.value) loadFile(pendingFile, openPassword.value); });
 openPassword.addEventListener('keydown', (event) => { if (event.key === 'Enter' && pendingFile && openPassword.value) loadFile(pendingFile, openPassword.value); });
 $('#cancel-password').addEventListener('click', () => { pendingFile = null; passwordPrompt.classList.add('hidden'); uploadCard.classList.remove('hidden'); fileInput.value = ''; });

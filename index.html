@@ -64,6 +64,9 @@
             <button class="operation" data-operation="protect" type="button" role="tab" aria-selected="false">
               <span class="operation-number">07</span><span><strong>添加密码保护</strong><small>为新副本设置打开密码</small></span>
             </button>
+            <button class="operation" data-operation="enhance" type="button" role="tab" aria-selected="false">
+              <span class="operation-number">08</span><span><strong>优化扫描页</strong><small>裁剪白边，调整亮度、对比度与灰度</small></span>
+            </button>
           </div>
 
           <div class="editor-area" id="range-editor">
@@ -103,6 +106,16 @@
           <div class="option-panel password-panel hidden" id="password-panel">
             <div><strong>设置打开密码</strong><small>密码不会存储；忘记后本工具也无法找回</small></div>
             <div class="password-fields"><input id="new-password" type="password" autocomplete="new-password" placeholder="输入密码" aria-label="新 PDF 打开密码" /><input id="confirm-password" type="password" autocomplete="new-password" placeholder="再次输入" aria-label="再次输入新 PDF 打开密码" /></div>
+          </div>
+
+          <div class="scan-panel hidden" id="scan-panel">
+            <div class="scan-panel-heading"><div><strong>扫描图增强</strong><small>只处理下方选中的页面；未选页面会原样保留</small></div><label class="check-control"><input id="auto-crop" type="checkbox" checked /><span>自动裁剪白边</span></label></div>
+            <div class="scan-controls">
+              <label for="crop-padding"><span>保留边距</span><output id="crop-padding-value" for="crop-padding">1%</output><input id="crop-padding" type="range" min="0" max="5" step="0.5" value="1" /></label>
+              <label for="scan-brightness"><span>亮度</span><output id="scan-brightness-value" for="scan-brightness">100%</output><input id="scan-brightness" type="range" min="80" max="120" step="1" value="100" /></label>
+              <label for="scan-contrast"><span>对比度</span><output id="scan-contrast-value" for="scan-contrast">110%</output><input id="scan-contrast" type="range" min="80" max="160" step="1" value="110" /></label>
+              <label class="check-control scan-grayscale"><input id="scan-grayscale" type="checkbox" /><span>转为灰度图</span></label>
+            </div>
           </div>
 
           <section class="page-browser hidden" id="page-browser" aria-labelledby="page-browser-title">
