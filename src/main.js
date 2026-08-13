@@ -1,10 +1,7 @@
-import { PDFDocument } from 'pdf-lib';
-import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist';
-import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
-import { createQpdfRunner } from 'qpdf-run';
+import { createPageSubset, openPdfRenderer, readPdfFile, renderPageThumbnail } from './pdf/document-engine.js';
+import { formatPageRange, parsePageRange } from './pdf/page-range.js';
+import { splitDoublePages } from './pdf/scan-processing.js';
 import './style.css';
-
-GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
 const $ = (selector) => document.querySelector(selector);
 const fileInput = $('#file-input');
@@ -18,6 +15,9 @@ const rangeLabel = $('#range-label');
 const rangeError = $('#range-error');
 const rangeEditor = $('#range-editor');
 const splitNotice = $('#split-notice');
+const pageBrowser = $('#page-browser');
+const thumbnailGrid = $('#thumbnail-grid');
+const selectedCount = $('#selected-count');
 const deskewAngle = $('#deskew-angle');
 const deskewValue = $('#deskew-value');
 const selectionSummary = $('#selection-summary');
@@ -30,48 +30,15 @@ let sourceBytes = null;
 let pageCount = 0;
 let operation = 'extract';
 let wasRestricted = false;
-
-async function decryptWithQpdf(bytes) {
-  const runner = await createQpdfRunner({
-    workerUrl: new URL('qpdf-run/worker', import.meta.url).href,
-    qpdfJsUrl: new URL('qpdf-run/qpdf.js', import.meta.url).href,
-    wasmUrl: new URL('qpdf-run/qpdf.wasm', import.meta.url).href,
-    timeoutMs: 120000,
-  });
-  try {
-    return await runner.runOne({
-      input: new Uint8Array(bytes),
-      inputName: 'source.pdf',
-      outputName: 'unrestricted.pdf',
-      args: ['--decrypt', '--', 'source.pdf', 'unrestricted.pdf'],
-    });
-  } finally {
-    await runner.destroy();
-  }
-}
+let selectedPages = new Set();
+let selectionAnchor = null;
+let rendererHandle = null;
+let thumbnailObserver = null;
+let documentGeneration = 0;
 
 function formatSize(bytes) {
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function parsePages(value) {
-  const raw = value.trim();
-  if (!raw) return { pages: [], error: '' };
-  if (!/^[\d\s,\-–]+$/.test(raw)) return { pages: [], error: '请只输入页码、英文逗号和连字符。' };
-  const pages = [];
-  for (const part of raw.split(',')) {
-    const item = part.trim().replace('–', '-');
-    if (!item) return { pages: [], error: '页码之间请不要留下空项。' };
-    const match = item.match(/^(\d+)(?:\s*-\s*(\d+))?$/);
-    if (!match) return { pages: [], error: `“${item}” 不是有效的页码格式。` };
-    const start = Number(match[1]);
-    const end = Number(match[2] || match[1]);
-    if (start < 1 || end < 1 || start > end) return { pages: [], error: `“${item}” 不是有效的页码范围。` };
-    if (end > pageCount) return { pages: [], error: `页码不能超过第 ${pageCount} 页。` };
-    for (let page = start; page <= end; page += 1) pages.push(page);
-  }
-  return { pages: [...new Set(pages)].sort((a, b) => a - b), error: '' };
 }
 
 function updateSelection() {
@@ -88,7 +55,7 @@ function updateSelection() {
     selectionSummary.textContent = `将生成完整的 ${pageCount} 页 PDF，不保留使用限制`;
     return;
   }
-  const { pages, error } = parsePages(pageRange.value);
+  const { pages, error } = parsePageRange(pageRange.value, pageCount);
   rangeError.textContent = error;
   rangeError.classList.toggle('hidden', !error);
   processButton.disabled = Boolean(error) || pages.length === 0;
@@ -103,6 +70,87 @@ function updateSelection() {
   if (operation === 'delete' && !unaffected) processButton.disabled = true;
 }
 
+function updateThumbnailSelection() {
+  thumbnailGrid.querySelectorAll('.page-thumbnail').forEach((thumbnail) => {
+    const selected = selectedPages.has(Number(thumbnail.dataset.page));
+    thumbnail.classList.toggle('selected', selected);
+    thumbnail.setAttribute('aria-pressed', String(selected));
+  });
+  selectedCount.textContent = `已选 ${selectedPages.size} 页`;
+}
+
+function syncSelectionFromInput() {
+  const { pages, error } = parsePageRange(pageRange.value, pageCount);
+  if (!error) selectedPages = new Set(pages);
+  updateThumbnailSelection();
+  updateSelection();
+}
+
+function syncInputFromSelection() {
+  pageRange.value = formatPageRange(selectedPages);
+  updateThumbnailSelection();
+  updateSelection();
+}
+
+function toggleThumbnailPage(page, extendRange) {
+  if (extendRange && selectionAnchor !== null) {
+    const start = Math.min(selectionAnchor, page);
+    const end = Math.max(selectionAnchor, page);
+    for (let current = start; current <= end; current += 1) selectedPages.add(current);
+  } else if (selectedPages.has(page)) {
+    selectedPages.delete(page);
+  } else {
+    selectedPages.add(page);
+  }
+  selectionAnchor = page;
+  syncInputFromSelection();
+}
+
+async function renderObservedThumbnail(thumbnail, pdfDocument, generation) {
+  if (thumbnail.dataset.rendered === 'true') return;
+  thumbnail.dataset.rendered = 'true';
+  try {
+    const canvas = await renderPageThumbnail(pdfDocument, Number(thumbnail.dataset.page));
+    if (generation !== documentGeneration || !thumbnail.isConnected) return;
+    const paper = thumbnail.querySelector('.thumbnail-paper');
+    paper.replaceChildren(canvas);
+  } catch (error) {
+    thumbnail.dataset.rendered = 'false';
+    console.warn('无法生成页面缩略图', error);
+  }
+}
+
+async function buildThumbnailBrowser(bytes) {
+  documentGeneration += 1;
+  const generation = documentGeneration;
+  thumbnailObserver?.disconnect();
+  if (rendererHandle) await rendererHandle.destroy();
+  rendererHandle = openPdfRenderer(bytes);
+  const pdfDocument = await rendererHandle.documentPromise;
+  if (generation !== documentGeneration) return;
+  const fragment = document.createDocumentFragment();
+  for (let page = 1; page <= pageCount; page += 1) {
+    const thumbnail = document.createElement('button');
+    thumbnail.type = 'button';
+    thumbnail.className = 'page-thumbnail';
+    thumbnail.dataset.page = String(page);
+    thumbnail.setAttribute('aria-label', `第 ${page} 页`);
+    thumbnail.setAttribute('aria-pressed', 'false');
+    thumbnail.innerHTML = `<span class="thumbnail-paper"><span class="thumbnail-placeholder"></span></span><span class="thumbnail-number"><span>PAGE ${page}</span><span class="selection-mark">✓</span></span>`;
+    thumbnail.addEventListener('click', (event) => toggleThumbnailPage(page, event.shiftKey));
+    fragment.appendChild(thumbnail);
+  }
+  thumbnailGrid.replaceChildren(fragment);
+  thumbnailObserver = new IntersectionObserver((entries) => {
+    entries.filter((entry) => entry.isIntersecting).forEach((entry) => {
+      thumbnailObserver.unobserve(entry.target);
+      renderObservedThumbnail(entry.target, pdfDocument, generation);
+    });
+  }, { root: thumbnailGrid, rootMargin: '180px' });
+  thumbnailGrid.querySelectorAll('.page-thumbnail').forEach((thumbnail) => thumbnailObserver.observe(thumbnail));
+  updateThumbnailSelection();
+}
+
 function setOperation(nextOperation) {
   operation = nextOperation;
   document.querySelectorAll('.operation').forEach((button) => {
@@ -112,6 +160,7 @@ function setOperation(nextOperation) {
   });
   const usesPages = operation === 'extract' || operation === 'delete';
   rangeEditor.classList.toggle('hidden', !usesPages);
+  pageBrowser.classList.toggle('hidden', !usesPages);
   splitNotice.classList.toggle('hidden', operation !== 'split');
   rangeLabel.textContent = operation === 'extract' ? '要提取哪些页？' : '要删除哪些页？';
   processButton.innerHTML = operation === 'extract'
@@ -145,19 +194,10 @@ async function loadFile(file) {
   }
   try {
     wasRestricted = false;
-    const originalBytes = await file.arrayBuffer();
-    let readableBytes = originalBytes;
-    let pdf;
-    try {
-      pdf = await PDFDocument.load(readableBytes);
-    } catch {
-      readableBytes = await decryptWithQpdf(originalBytes);
-      pdf = await PDFDocument.load(readableBytes);
-      wasRestricted = true;
-    }
-    sourceBytes = readableBytes;
-    pageCount = pdf.getPageCount();
-    if (!pageCount) throw new Error('empty');
+    const loadedPdf = await readPdfFile(file);
+    sourceBytes = loadedPdf.bytes;
+    pageCount = loadedPdf.pageCount;
+    wasRestricted = loadedPdf.wasRestricted;
     sourceFile = file;
     fileName.textContent = file.name;
     fileMeta.textContent = `${pageCount} 页 · ${formatSize(file.size)}${wasRestricted ? ' · 已解除使用限制' : ''}`;
@@ -165,8 +205,11 @@ async function loadFile(file) {
     uploadCard.classList.add('hidden');
     documentCard.classList.remove('hidden');
     pageRange.value = '';
+    selectedPages = new Set();
+    selectionAnchor = null;
+    await buildThumbnailBrowser(sourceBytes);
     setOperation(wasRestricted ? 'unlock' : 'extract');
-    pageRange.focus();
+    if (!wasRestricted) pageRange.focus();
   } catch (error) {
     console.error(error);
     showToast('无法读取该 PDF。它可能需要打开密码，或文件已损坏。');
@@ -174,7 +217,7 @@ async function loadFile(file) {
 }
 
 async function generatePdf() {
-  const { pages, error } = parsePages(pageRange.value);
+  const { pages, error } = parsePageRange(pageRange.value, pageCount);
   const requiresPages = operation === 'extract' || operation === 'delete';
   if ((requiresPages && (error || !pages.length)) || !sourceBytes) return;
   const selected = new Set(pages);
@@ -191,13 +234,11 @@ async function generatePdf() {
     if (operation === 'unlock') {
       bytes = sourceBytes;
     } else if (operation === 'split') {
-      bytes = await splitDoublePages(sourceBytes, Number(deskewAngle.value));
+      bytes = await splitDoublePages(sourceBytes, Number(deskewAngle.value), (current, total) => {
+        selectionSummary.textContent = `正在切割第 ${current} / ${total} 张双页…`;
+      });
     } else {
-      const source = await PDFDocument.load(sourceBytes);
-      const output = await PDFDocument.create();
-      const copiedPages = await output.copyPages(source, indices);
-      copiedPages.forEach((page) => output.addPage(page));
-      bytes = await output.save();
+      bytes = await createPageSubset(sourceBytes, indices);
     }
     const stem = sourceFile.name.replace(/\.pdf$/i, '');
     const suffix = operation === 'extract' ? '提取页' : operation === 'delete' ? '已删除页' : operation === 'unlock' ? '无使用限制' : '双页已切开';
@@ -216,60 +257,6 @@ async function generatePdf() {
   }
 }
 
-function rotateCanvas(canvas, angle) {
-  if (!angle) return canvas;
-  const radians = (angle * Math.PI) / 180;
-  const rotated = document.createElement('canvas');
-  rotated.width = Math.ceil(Math.abs(canvas.width * Math.cos(radians)) + Math.abs(canvas.height * Math.sin(radians)));
-  rotated.height = Math.ceil(Math.abs(canvas.width * Math.sin(radians)) + Math.abs(canvas.height * Math.cos(radians)));
-  const context = rotated.getContext('2d', { alpha: false });
-  context.fillStyle = '#ffffff';
-  context.fillRect(0, 0, rotated.width, rotated.height);
-  context.translate(rotated.width / 2, rotated.height / 2);
-  context.rotate(radians);
-  context.drawImage(canvas, -canvas.width / 2, -canvas.height / 2);
-  return rotated;
-}
-
-async function splitDoublePages(bytes, angle) {
-  const loadingTask = getDocument({ data: new Uint8Array(bytes) });
-  const source = await loadingTask.promise;
-  const output = await PDFDocument.create();
-  try {
-    for (let index = 1; index <= source.numPages; index += 1) {
-      selectionSummary.textContent = `正在切割第 ${index} / ${source.numPages} 张双页…`;
-      const sourcePage = await source.getPage(index);
-      const viewport = sourcePage.getViewport({ scale: 2 });
-      const canvas = document.createElement('canvas');
-      canvas.width = Math.round(viewport.width);
-      canvas.height = Math.round(viewport.height);
-      const context = canvas.getContext('2d', { alpha: false });
-      context.fillStyle = '#ffffff';
-      context.fillRect(0, 0, canvas.width, canvas.height);
-      await sourcePage.render({ canvasContext: context, viewport }).promise;
-      const adjustedCanvas = rotateCanvas(canvas, angle);
-      const originalViewport = sourcePage.getViewport({ scale: 1 });
-      const scale = adjustedCanvas.height / canvas.height;
-      const halfWidth = Math.floor(adjustedCanvas.width / 2);
-      for (const sourceX of [0, adjustedCanvas.width - halfWidth]) {
-        const halfCanvas = document.createElement('canvas');
-        halfCanvas.width = halfWidth;
-        halfCanvas.height = adjustedCanvas.height;
-        const halfContext = halfCanvas.getContext('2d', { alpha: false });
-        halfContext.fillStyle = '#ffffff';
-        halfContext.fillRect(0, 0, halfCanvas.width, halfCanvas.height);
-        halfContext.drawImage(adjustedCanvas, sourceX, 0, halfWidth, adjustedCanvas.height, 0, 0, halfWidth, adjustedCanvas.height);
-        const image = await output.embedJpg(halfCanvas.toDataURL('image/jpeg', 0.94));
-        const page = output.addPage([(originalViewport.width / 2) * scale, originalViewport.height * scale]);
-        page.drawImage(image, { x: 0, y: 0, width: page.getWidth(), height: page.getHeight() });
-      }
-    }
-    return output.save();
-  } finally {
-    await loadingTask.destroy();
-  }
-}
-
 $('#browse-button').addEventListener('click', () => fileInput.click());
 $('#replace-button').addEventListener('click', () => fileInput.click());
 fileInput.addEventListener('change', (event) => loadFile(event.target.files[0]));
@@ -279,9 +266,10 @@ uploadCard.addEventListener('drop', (event) => { event.preventDefault(); uploadC
 document.addEventListener('dragover', (event) => event.preventDefault());
 document.addEventListener('drop', (event) => { if (event.target !== uploadCard && !uploadCard.contains(event.target)) loadFile(event.dataTransfer.files[0]); });
 document.querySelectorAll('.operation').forEach((button) => button.addEventListener('click', () => setOperation(button.dataset.operation)));
-pageRange.addEventListener('input', updateSelection);
+pageRange.addEventListener('input', syncSelectionFromInput);
 deskewAngle.addEventListener('input', () => { deskewValue.textContent = `${Number(deskewAngle.value).toFixed(1).replace('.0', '')}°`; updateSelection(); });
 $('#deskew-left').addEventListener('click', () => changeDeskewAngle(-0.1));
 $('#deskew-right').addEventListener('click', () => changeDeskewAngle(0.1));
-selectAllButton.addEventListener('click', () => { pageRange.value = `1-${pageCount}`; updateSelection(); pageRange.focus(); });
+selectAllButton.addEventListener('click', () => { selectedPages = new Set(Array.from({ length: pageCount }, (_, index) => index + 1)); syncInputFromSelection(); pageRange.focus(); });
+$('#clear-selection-button').addEventListener('click', () => { selectedPages.clear(); selectionAnchor = null; syncInputFromSelection(); });
 processButton.addEventListener('click', generatePdf);
