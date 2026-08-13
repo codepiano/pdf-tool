@@ -29,6 +29,12 @@
           <small>支持单个 PDF 文件</small>
         </div>
 
+        <div class="password-prompt hidden" id="password-prompt">
+          <div class="password-lock" aria-hidden="true">⌁</div>
+          <div><p class="eyebrow">OPEN PASSWORD</p><h2>这个 PDF 需要打开密码</h2><p><strong id="password-file-name"></strong> 无法直接读取。请输入你已知且有权使用的密码，处理仍只在本机进行。</p></div>
+          <div class="password-prompt-actions"><input id="open-password" type="password" autocomplete="off" placeholder="输入打开密码" aria-label="PDF 打开密码" /><button class="button primary" id="open-with-password" type="button">打开 PDF</button><button class="text-button" id="cancel-password" type="button">换一个文件</button></div>
+        </div>
+
         <div class="document-card hidden" id="document-card">
           <div class="file-summary">
             <div class="pdf-badge">PDF</div>
@@ -54,6 +60,9 @@
             </button>
             <button class="operation" data-operation="rotate" type="button" role="tab" aria-selected="false">
               <span class="operation-number">06</span><span><strong>旋转页面</strong><small>将指定页面无损旋转 90°、180° 或 270°</small></span>
+            </button>
+            <button class="operation" data-operation="protect" type="button" role="tab" aria-selected="false">
+              <span class="operation-number">07</span><span><strong>添加密码保护</strong><small>为新副本设置打开密码</small></span>
             </button>
           </div>
 
@@ -89,6 +98,11 @@
               <button class="choice-button" data-rotation="180" type="button" aria-pressed="false">180°</button>
               <button class="choice-button" data-rotation="270" type="button" aria-pressed="false">270°</button>
             </div>
+          </div>
+
+          <div class="option-panel password-panel hidden" id="password-panel">
+            <div><strong>设置打开密码</strong><small>密码不会存储；忘记后本工具也无法找回</small></div>
+            <div class="password-fields"><input id="new-password" type="password" autocomplete="new-password" placeholder="输入密码" aria-label="新 PDF 打开密码" /><input id="confirm-password" type="password" autocomplete="new-password" placeholder="再次输入" aria-label="再次输入新 PDF 打开密码" /></div>
           </div>
 
           <section class="page-browser hidden" id="page-browser" aria-labelledby="page-browser-title">

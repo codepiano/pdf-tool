@@ -1,4 +1,4 @@
-import { createPageSubset, openPdfRenderer, readPdfFile, renderPageThumbnail } from './pdf/document-engine.js';
+import { createPageSubset, openPdfRenderer, protectPdf, readPdfFile, renderPageThumbnail } from './pdf/document-engine.js';
 import { formatPageRange, parsePageRange } from './pdf/page-range.js';
 import { movePageBefore } from './pdf/page-order.js';
 import { rotatePdfPages } from './pdf/page-transform.js';
@@ -9,6 +9,9 @@ const $ = (selector) => document.querySelector(selector);
 const fileInput = $('#file-input');
 const uploadCard = $('#upload-card');
 const documentCard = $('#document-card');
+const passwordPrompt = $('#password-prompt');
+const passwordFileName = $('#password-file-name');
+const openPassword = $('#open-password');
 const fileName = $('#file-name');
 const fileMeta = $('#file-meta');
 const totalPages = $('#total-pages');
@@ -18,6 +21,9 @@ const rangeError = $('#range-error');
 const rangeEditor = $('#range-editor');
 const splitNotice = $('#split-notice');
 const rotationPanel = $('#rotation-panel');
+const passwordPanel = $('#password-panel');
+const newPassword = $('#new-password');
+const confirmPassword = $('#confirm-password');
 const pageBrowser = $('#page-browser');
 const thumbnailGrid = $('#thumbnail-grid');
 const selectedCount = $('#selected-count');
@@ -35,6 +41,7 @@ const selectAllButton = $('#select-all-button');
 const toast = $('#toast');
 
 let sourceFile = null;
+let pendingFile = null;
 let sourceBytes = null;
 let pageCount = 0;
 let operation = 'extract';
@@ -64,6 +71,14 @@ function updateSelection() {
     rangeError.classList.add('hidden');
     processButton.disabled = false;
     selectionSummary.textContent = `将生成完整的 ${pageCount} 页 PDF，不保留使用限制`;
+    return;
+  }
+  if (operation === 'protect') {
+    rangeError.classList.add('hidden');
+    const password = newPassword.value;
+    const matches = password && password === confirmPassword.value;
+    processButton.disabled = !matches;
+    selectionSummary.textContent = !password ? '请输入新 PDF 的打开密码' : !matches ? '两次输入的密码不一致' : `将为完整的 ${pageCount} 页 PDF 添加打开密码`;
     return;
   }
   const { pages, error } = parsePageRange(pageRange.value, pageCount);
@@ -221,6 +236,7 @@ function setOperation(nextOperation) {
   pageBrowserHelp.textContent = operation === 'reorder' ? '拖拽页面卡片改变顺序' : '点击选择页面，按住 Shift 可连续选择';
   splitNotice.classList.toggle('hidden', operation !== 'split');
   rotationPanel.classList.toggle('hidden', operation !== 'rotate');
+  passwordPanel.classList.toggle('hidden', operation !== 'protect');
   rangeLabel.textContent = operation === 'extract' ? '要提取哪些页？' : operation === 'rotate' ? '要旋转哪些页？' : operation === 'split' ? '要切开哪些页？' : '要删除哪些页？';
   processButton.innerHTML = operation === 'extract'
     ? '生成新 PDF <span aria-hidden="true">→</span>'
@@ -230,9 +246,11 @@ function setOperation(nextOperation) {
         ? '生成无使用限制副本 <span aria-hidden="true">→</span>'
         : operation === 'split'
           ? '切开并生成新 PDF <span aria-hidden="true">→</span>'
-          : operation === 'rotate'
+        : operation === 'rotate'
             ? '旋转并生成新 PDF <span aria-hidden="true">→</span>'
-            : '按当前顺序生成 <span aria-hidden="true">→</span>';
+            : operation === 'protect'
+              ? '加密并生成新 PDF <span aria-hidden="true">→</span>'
+              : '按当前顺序生成 <span aria-hidden="true">→</span>';
   updateThumbnailSelection();
   if (operation === 'split' && selectedPages.size === 0) {
     selectedPages = new Set(Array.from({ length: pageCount }, (_, index) => index + 1));
@@ -255,7 +273,7 @@ function changeDeskewAngle(delta) {
   deskewAngle.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
-async function loadFile(file) {
+async function loadFile(file, password = '') {
   if (!file) return;
   if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
     showToast('请选择 PDF 文件。');
@@ -263,15 +281,17 @@ async function loadFile(file) {
   }
   try {
     wasRestricted = false;
-    const loadedPdf = await readPdfFile(file);
+    const loadedPdf = await readPdfFile(file, password);
     sourceBytes = loadedPdf.bytes;
     pageCount = loadedPdf.pageCount;
     wasRestricted = loadedPdf.wasRestricted;
     sourceFile = file;
+    pendingFile = null;
     fileName.textContent = file.name;
     fileMeta.textContent = `${pageCount} 页 · ${formatSize(file.size)}${wasRestricted ? ' · 已解除使用限制' : ''}`;
     totalPages.textContent = pageCount;
     uploadCard.classList.add('hidden');
+    passwordPrompt.classList.add('hidden');
     documentCard.classList.remove('hidden');
     pageRange.value = '';
     selectedPages = new Set();
@@ -282,7 +302,14 @@ async function loadFile(file) {
     if (!wasRestricted) pageRange.focus();
   } catch (error) {
     console.error(error);
-    showToast('无法读取该 PDF。它可能需要打开密码，或文件已损坏。');
+    pendingFile = file;
+    passwordFileName.textContent = file.name;
+    uploadCard.classList.add('hidden');
+    documentCard.classList.add('hidden');
+    passwordPrompt.classList.remove('hidden');
+    openPassword.value = '';
+    openPassword.focus();
+    showToast(password ? '密码不正确，或该 PDF 已损坏。' : '请输入 PDF 的打开密码。');
   }
 }
 
@@ -305,6 +332,8 @@ async function generatePdf() {
     let bytes;
     if (operation === 'unlock') {
       bytes = sourceBytes;
+    } else if (operation === 'protect') {
+      bytes = await protectPdf(sourceBytes, newPassword.value);
     } else if (operation === 'split') {
       bytes = await splitDoublePages(sourceBytes, {
         angle: Number(deskewAngle.value),
@@ -320,7 +349,7 @@ async function generatePdf() {
       bytes = await createPageSubset(sourceBytes, indices);
     }
     const stem = sourceFile.name.replace(/\.pdf$/i, '');
-    const suffix = operation === 'extract' ? '提取页' : operation === 'delete' ? '已删除页' : operation === 'unlock' ? '无使用限制' : operation === 'split' ? '双页已切开' : operation === 'rotate' ? '已旋转' : '已排序';
+    const suffix = operation === 'extract' ? '提取页' : operation === 'delete' ? '已删除页' : operation === 'unlock' ? '无使用限制' : operation === 'split' ? '双页已切开' : operation === 'rotate' ? '已旋转' : operation === 'protect' ? '已加密' : '已排序';
     const blob = new Blob([bytes], { type: 'application/pdf' });
     const url = URL.createObjectURL(blob);
     const link = Object.assign(document.createElement('a'), { href: url, download: `${stem}-${suffix}.pdf` });
@@ -345,6 +374,11 @@ uploadCard.addEventListener('drop', (event) => { event.preventDefault(); uploadC
 document.addEventListener('dragover', (event) => event.preventDefault());
 document.addEventListener('drop', (event) => { if (event.target !== uploadCard && !uploadCard.contains(event.target)) loadFile(event.dataTransfer.files[0]); });
 document.querySelectorAll('.operation').forEach((button) => button.addEventListener('click', () => setOperation(button.dataset.operation)));
+newPassword.addEventListener('input', updateSelection);
+confirmPassword.addEventListener('input', updateSelection);
+$('#open-with-password').addEventListener('click', () => { if (pendingFile && openPassword.value) loadFile(pendingFile, openPassword.value); });
+openPassword.addEventListener('keydown', (event) => { if (event.key === 'Enter' && pendingFile && openPassword.value) loadFile(pendingFile, openPassword.value); });
+$('#cancel-password').addEventListener('click', () => { pendingFile = null; passwordPrompt.classList.add('hidden'); uploadCard.classList.remove('hidden'); fileInput.value = ''; });
 document.querySelectorAll('[data-rotation]').forEach((button) => button.addEventListener('click', () => {
   rotationAngle = Number(button.dataset.rotation);
   document.querySelectorAll('[data-rotation]').forEach((choice) => {

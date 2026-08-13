@@ -5,26 +5,30 @@ import { createQpdfRunner } from 'qpdf-run';
 
 GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
-async function decryptWithQpdf(bytes) {
-  const runner = await createQpdfRunner({
+function createRunner() {
+  return createQpdfRunner({
     workerUrl: new URL('qpdf-run/worker', import.meta.url).href,
     qpdfJsUrl: new URL('qpdf-run/qpdf.js', import.meta.url).href,
     wasmUrl: new URL('qpdf-run/qpdf.wasm', import.meta.url).href,
     timeoutMs: 120000,
   });
+}
+
+async function decryptWithQpdf(bytes, password = '') {
+  const runner = await createRunner();
   try {
     return await runner.runOne({
       input: new Uint8Array(bytes),
       inputName: 'source.pdf',
       outputName: 'unrestricted.pdf',
-      args: ['--decrypt', '--', 'source.pdf', 'unrestricted.pdf'],
+      args: [...(password ? [`--password=${password}`] : []), '--decrypt', '--', 'source.pdf', 'unrestricted.pdf'],
     });
   } finally {
     await runner.destroy();
   }
 }
 
-export async function readPdfFile(file) {
+export async function readPdfFile(file, password = '') {
   const originalBytes = await file.arrayBuffer();
   let bytes = originalBytes;
   let pdf;
@@ -32,13 +36,29 @@ export async function readPdfFile(file) {
   try {
     pdf = await PDFDocument.load(bytes);
   } catch {
-    bytes = await decryptWithQpdf(originalBytes);
+    bytes = await decryptWithQpdf(originalBytes, password);
     pdf = await PDFDocument.load(bytes);
     wasRestricted = true;
   }
   const pageCount = pdf.getPageCount();
   if (!pageCount) throw new Error('PDF contains no pages');
   return { bytes, pageCount, wasRestricted };
+}
+
+export async function protectPdf(bytes, password) {
+  if (!password) throw new Error('Password is required');
+  const runner = await createRunner();
+  const ownerPassword = `${crypto.randomUUID()}${crypto.randomUUID()}`;
+  try {
+    return await runner.runOne({
+      input: new Uint8Array(bytes),
+      inputName: 'source.pdf',
+      outputName: 'protected.pdf',
+      args: ['--encrypt', password, ownerPassword, '256', '--', 'source.pdf', 'protected.pdf'],
+    });
+  } finally {
+    await runner.destroy();
+  }
 }
 
 export function openPdfRenderer(bytes) {
