@@ -67,6 +67,9 @@
             <button class="operation" data-operation="enhance" type="button" role="tab" aria-selected="false">
               <span class="operation-number">08</span><span><strong>优化扫描页</strong><small>裁剪白边，调整亮度、对比度与灰度</small></span>
             </button>
+            <button class="operation" data-operation="chapter" type="button" role="tab" aria-selected="false">
+              <span class="operation-number">09</span><span><strong>按章节切割</strong><small>读取 PDF 目录，或手动输入章节起始页</small></span>
+            </button>
           </div>
 
           <div class="editor-area" id="range-editor">
@@ -116,6 +119,13 @@
               <label for="scan-contrast"><span>对比度</span><output id="scan-contrast-value" for="scan-contrast">110%</output><input id="scan-contrast" type="range" min="80" max="160" step="1" value="110" /></label>
               <label class="check-control scan-grayscale"><input id="scan-grayscale" type="checkbox" /><span>转为灰度图</span></label>
             </div>
+          </div>
+
+          <div class="chapter-panel hidden" id="chapter-panel">
+            <div class="chapter-panel-heading"><div><strong>章节来源</strong><small>目录页码和手动切割点都是 PDF 阅读器页码</small></div><div class="choice-row" role="group" aria-label="章节来源"><button class="choice-button active" data-chapter-mode="outline" type="button" aria-pressed="true">读取 PDF 目录</button><button class="choice-button" data-chapter-mode="manual" type="button" aria-pressed="false">手动切割点</button></div></div>
+            <div id="outline-list" class="outline-list"></div>
+            <p id="outline-empty" class="outline-empty hidden">没有找到可定位到页面的 PDF 目录，请切换到“手动切割点”。</p>
+            <div id="manual-cut-points" class="manual-cut-points hidden"><label for="manual-cut-input">章节起始页</label><input id="manual-cut-input" type="text" placeholder="例如 1, 18, 42, 79" aria-describedby="manual-cut-help" /><p id="manual-cut-help" class="input-help">输入每个章节的起始页；工具会自动补上第 1 页，并把每个起始页切到下一个起始页之前。</p></div>
           </div>
 
           <section class="page-browser hidden" id="page-browser" aria-labelledby="page-browser-title">

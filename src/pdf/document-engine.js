@@ -70,6 +70,35 @@ export function openPdfRenderer(bytes) {
   };
 }
 
+async function resolveOutlineDestination(pdf, destination) {
+  const resolved = typeof destination === 'string' ? await pdf.getDestination(destination) : destination;
+  if (!Array.isArray(resolved) || !resolved[0]) return null;
+  try {
+    return (await pdf.getPageIndex(resolved[0])) + 1;
+  } catch {
+    return null;
+  }
+}
+
+async function mapOutlineItems(pdf, items, depth = 0) {
+  return Promise.all((items || []).map(async (item) => ({
+    title: item.title || '未命名章节',
+    page: await resolveOutlineDestination(pdf, item.dest),
+    depth,
+    children: await mapOutlineItems(pdf, item.items, depth + 1),
+  })));
+}
+
+export async function readPdfOutline(bytes) {
+  const renderer = openPdfRenderer(bytes);
+  try {
+    const pdf = await renderer.documentPromise;
+    return await mapOutlineItems(pdf, await pdf.getOutline());
+  } finally {
+    await renderer.destroy();
+  }
+}
+
 export async function renderPageThumbnail(pdfDocument, pageNumber, maxWidth = 132) {
   const page = await pdfDocument.getPage(pageNumber);
   const initialViewport = page.getViewport({ scale: 1 });

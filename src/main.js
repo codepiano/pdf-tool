@@ -1,8 +1,10 @@
 import { createPageSubset, openPdfRenderer, protectPdf, readPdfFile, renderPageThumbnail } from './pdf/document-engine.js';
+import { readPdfOutline } from './pdf/document-engine.js';
 import { formatPageRange, parsePageRange } from './pdf/page-range.js';
 import { movePageBefore } from './pdf/page-order.js';
 import { rotatePdfPages } from './pdf/page-transform.js';
 import { enhanceScannedPages, splitDoublePages } from './pdf/scan-processing.js';
+import { createChapterZip, parseCutPoints, rangesFromChapterStarts } from './pdf/chapter-splitting.js';
 import './style.css';
 
 const $ = (selector) => document.querySelector(selector);
@@ -28,6 +30,12 @@ const cropPadding = $('#crop-padding');
 const scanBrightness = $('#scan-brightness');
 const scanContrast = $('#scan-contrast');
 const scanGrayscale = $('#scan-grayscale');
+const chapterPanel = $('#chapter-panel');
+const chapterModeButtons = document.querySelectorAll('[data-chapter-mode]');
+const outlineList = $('#outline-list');
+const outlineEmpty = $('#outline-empty');
+const manualCutPointPanel = $('#manual-cut-points');
+const manualCutPoints = $('#manual-cut-input');
 const newPassword = $('#new-password');
 const confirmPassword = $('#confirm-password');
 const pageBrowser = $('#page-browser');
@@ -58,6 +66,8 @@ let selectionAnchor = null;
 let draggedPage = null;
 let rotationAngle = 90;
 let splitOrder = 'ltr';
+let chapterMode = 'outline';
+let outlineItems = [];
 let rendererHandle = null;
 let thumbnailObserver = null;
 let documentGeneration = 0;
@@ -85,6 +95,17 @@ function updateSelection() {
     const matches = password && password === confirmPassword.value;
     processButton.disabled = !matches;
     selectionSummary.textContent = !password ? '请输入新 PDF 的打开密码' : !matches ? '两次输入的密码不一致' : `将为完整的 ${pageCount} 页 PDF 添加打开密码`;
+    return;
+  }
+  if (operation === 'chapter') {
+    const starts = chapterMode === 'manual'
+      ? parseCutPoints(manualCutPoints.value, pageCount)
+      : { starts: outlineItems.filter((item) => item.selected && item.page).map((item) => item.page), ranges: [], error: '' };
+    const ranges = chapterMode === 'manual' ? starts.ranges : rangesFromChapterStarts(starts.starts, pageCount);
+    rangeError.textContent = starts.error;
+    rangeError.classList.toggle('hidden', !starts.error);
+    processButton.disabled = Boolean(starts.error) || ranges.length < 2;
+    selectionSummary.textContent = starts.error ? '请修正切割点后继续' : ranges.length < 2 ? '至少需要两个章节起始点才能切割' : `将生成 ${ranges.length} 个章节 PDF，并打包为 ZIP`;
     return;
   }
   const { pages, error } = parsePageRange(pageRange.value, pageCount);
@@ -227,6 +248,25 @@ async function buildThumbnailBrowser(bytes) {
   updateThumbnailSelection();
 }
 
+function renderOutlineList() {
+  if (!outlineList) return;
+  outlineList.replaceChildren();
+  const validItems = outlineItems.filter((item) => item.page);
+  outlineEmpty.classList.toggle('hidden', validItems.length > 0);
+  validItems.forEach((item) => {
+    const label = document.createElement('label');
+    label.className = 'outline-item';
+    label.style.paddingLeft = `${12 + item.depth * 20}px`;
+    label.innerHTML = `<input type="checkbox" ${item.selected ? 'checked' : ''} /><span class="outline-title"></span><small>第 ${item.page} 页</small>`;
+    label.querySelector('.outline-title').textContent = item.title;
+    label.querySelector('input').addEventListener('change', (event) => {
+      item.selected = event.target.checked;
+      updateSelection();
+    });
+    outlineList.appendChild(label);
+  });
+}
+
 function setOperation(nextOperation) {
   operation = nextOperation;
   document.querySelectorAll('.operation').forEach((button) => {
@@ -246,6 +286,7 @@ function setOperation(nextOperation) {
   rotationPanel.classList.toggle('hidden', operation !== 'rotate');
   passwordPanel.classList.toggle('hidden', operation !== 'protect');
   scanPanel.classList.toggle('hidden', operation !== 'enhance');
+  chapterPanel.classList.toggle('hidden', operation !== 'chapter');
   rangeLabel.textContent = operation === 'extract' ? '要提取哪些页？' : operation === 'rotate' ? '要旋转哪些页？' : operation === 'split' ? '要切开哪些页？' : operation === 'enhance' ? '要优化哪些扫描页？' : '要删除哪些页？';
   processButton.innerHTML = operation === 'extract'
     ? '生成新 PDF <span aria-hidden="true">→</span>'
@@ -261,6 +302,8 @@ function setOperation(nextOperation) {
               ? '加密并生成新 PDF <span aria-hidden="true">→</span>'
               : operation === 'enhance'
                 ? '优化并生成新 PDF <span aria-hidden="true">→</span>'
+                : operation === 'chapter'
+                  ? '切割章节并下载 ZIP <span aria-hidden="true">→</span>'
                 : '按当前顺序生成 <span aria-hidden="true">→</span>';
   updateThumbnailSelection();
   if ((operation === 'split' || operation === 'enhance') && selectedPages.size === 0) {
@@ -308,6 +351,8 @@ async function loadFile(file, password = '') {
     selectedPages = new Set();
     pageOrder = Array.from({ length: pageCount }, (_, index) => index + 1);
     selectionAnchor = null;
+    outlineItems = (await readPdfOutline(sourceBytes)).map((item) => ({ ...item, selected: true }));
+    renderOutlineList();
     await buildThumbnailBrowser(sourceBytes);
     setOperation(wasRestricted ? 'unlock' : 'extract');
     if (!wasRestricted) pageRange.focus();
@@ -365,6 +410,12 @@ async function generatePdf() {
       }, (current, total) => {
         selectionSummary.textContent = `正在优化第 ${current} / ${total} 个阅读器页面…`;
       });
+    } else if (operation === 'chapter') {
+      const parsed = chapterMode === 'manual'
+        ? parseCutPoints(manualCutPoints.value, pageCount)
+        : { ranges: rangesFromChapterStarts(outlineItems.filter((item) => item.selected && item.page).map((item) => item.page), pageCount), error: '' };
+      if (parsed.error || parsed.ranges.length < 2) throw new Error(parsed.error || 'At least two chapter starts are required');
+      bytes = await createChapterZip(sourceBytes, parsed.ranges, sourceFile.name.replace(/\.pdf$/i, ''));
     } else if (operation === 'rotate') {
       bytes = await rotatePdfPages(sourceBytes, pages, rotationAngle);
     } else {
@@ -372,12 +423,13 @@ async function generatePdf() {
     }
     const stem = sourceFile.name.replace(/\.pdf$/i, '');
     const suffix = operation === 'extract' ? '提取页' : operation === 'delete' ? '已删除页' : operation === 'unlock' ? '无使用限制' : operation === 'split' ? '双页已切开' : operation === 'rotate' ? '已旋转' : operation === 'protect' ? '已加密' : operation === 'enhance' ? '扫描已优化' : '已排序';
-    const blob = new Blob([bytes], { type: 'application/pdf' });
+    const isChapterZip = operation === 'chapter';
+    const blob = new Blob([bytes], { type: isChapterZip ? 'application/zip' : 'application/pdf' });
     const url = URL.createObjectURL(blob);
-    const link = Object.assign(document.createElement('a'), { href: url, download: `${stem}-${suffix}.pdf` });
+    const link = Object.assign(document.createElement('a'), { href: url, download: `${stem}-${isChapterZip ? '章节切割' : suffix}.${isChapterZip ? 'zip' : 'pdf'}` });
     link.click();
     URL.revokeObjectURL(url);
-    showToast(operation === 'unlock' ? '无使用限制的 PDF 已开始下载。' : operation === 'split' ? '切开的 PDF 已开始下载。' : '新 PDF 已开始下载。');
+    showToast(operation === 'chapter' ? '章节 ZIP 已开始下载。' : operation === 'unlock' ? '无使用限制的 PDF 已开始下载。' : operation === 'split' ? '切开的 PDF 已开始下载。' : '新 PDF 已开始下载。');
   } catch (error) {
     console.error(error);
     showToast(operation === 'unlock' ? '无法生成副本。若文件需要打开密码，请先在阅读器中解锁后再试。' : operation === 'split' ? '切割失败，请重新选择文件后再试。' : '生成失败，请重新选择文件后再试。');
@@ -396,6 +448,19 @@ uploadCard.addEventListener('drop', (event) => { event.preventDefault(); uploadC
 document.addEventListener('dragover', (event) => event.preventDefault());
 document.addEventListener('drop', (event) => { if (event.target !== uploadCard && !uploadCard.contains(event.target)) loadFile(event.dataTransfer.files[0]); });
 document.querySelectorAll('.operation').forEach((button) => button.addEventListener('click', () => setOperation(button.dataset.operation)));
+chapterModeButtons.forEach((button) => button.addEventListener('click', () => {
+  chapterMode = button.dataset.chapterMode;
+  chapterModeButtons.forEach((choice) => {
+    const active = choice === button;
+    choice.classList.toggle('active', active);
+    choice.setAttribute('aria-pressed', String(active));
+  });
+  outlineList.classList.toggle('hidden', chapterMode !== 'outline');
+  outlineEmpty.classList.toggle('hidden', chapterMode !== 'outline' || outlineItems.some((item) => item.page));
+  manualCutPointPanel.classList.toggle('hidden', chapterMode !== 'manual');
+  updateSelection();
+}));
+manualCutPoints.addEventListener('input', updateSelection);
 newPassword.addEventListener('input', updateSelection);
 confirmPassword.addEventListener('input', updateSelection);
 function bindScanControl(input, output, formatter = (value) => `${value}%`) {
