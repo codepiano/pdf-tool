@@ -19,6 +19,26 @@ export function rangesFromChapterStarts(starts, pageCount) {
   return normalized.map((start, index) => ({ start, end: (normalized[index + 1] || pageCount + 1) - 1 }));
 }
 
+export function rangesFromChapterItems(items, pageCount) {
+  const selected = items.filter((item) => item.selected && Number.isInteger(item.page) && item.page >= 1 && item.page <= pageCount)
+    .sort((a, b) => a.page - b.page);
+  if (selected.some((item, index) => index > 0 && item.page === selected[index - 1].page)) {
+    return { ranges: [], error: '章节起始页不能重复。' };
+  }
+  const ranges = selected.map((item, index) => {
+    const nextStart = selected[index + 1]?.page || pageCount + 1;
+    const end = Number.isInteger(item.end) ? item.end : nextStart - 1;
+    return { start: item.page, end };
+  });
+  for (let index = 0; index < ranges.length; index += 1) {
+    const range = ranges[index];
+    if (range.end < range.start || range.end > pageCount || (ranges[index + 1] && range.end >= ranges[index + 1].start)) {
+      return { ranges: [], error: '章节结束页必须不小于起始页，且不能覆盖下一个章节。' };
+    }
+  }
+  return { ranges, error: '' };
+}
+
 function safeFileName(value, fallback) {
   const cleaned = String(value || '').replace(/[\\/:*?"<>|\u0000-\u001f]/g, ' ').replace(/\s+/g, ' ').trim();
   return (cleaned || fallback).slice(0, 100);

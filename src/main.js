@@ -4,7 +4,7 @@ import { formatPageRange, parsePageRange } from './pdf/page-range.js';
 import { movePageBefore } from './pdf/page-order.js';
 import { rotatePdfPages } from './pdf/page-transform.js';
 import { enhanceScannedPages, splitDoublePages } from './pdf/scan-processing.js';
-import { createChapterZip, parseCutPoints, rangesFromChapterStarts } from './pdf/chapter-splitting.js';
+import { createChapterZip, parseCutPoints, rangesFromChapterItems } from './pdf/chapter-splitting.js';
 import { createPageNumberOcrWorker, createTocOcrWorker, mapPrintedPagesToPdf, parseTocLines, recognizePageNumbers, recognizePageText } from './pdf/page-number-ocr.js';
 import './style.css';
 
@@ -107,12 +107,9 @@ function updateSelection() {
     return;
   }
   if (operation === 'chapter') {
-    const starts = chapterMode === 'manual'
-      ? parseCutPoints(manualCutPoints.value, pageCount)
-      : chapterMode === 'ocr'
-        ? { starts: ocrItems.filter((item) => item.selected && item.page).map((item) => item.page), ranges: [], error: '' }
-        : { starts: outlineItems.filter((item) => item.selected && item.page).map((item) => item.page), ranges: [], error: '' };
-    const ranges = chapterMode === 'manual' ? starts.ranges : rangesFromChapterStarts(starts.starts, pageCount);
+    const chapterItems = chapterMode === 'ocr' ? ocrItems : outlineItems;
+    const starts = chapterMode === 'manual' ? parseCutPoints(manualCutPoints.value, pageCount) : rangesFromChapterItems(chapterItems, pageCount);
+    const ranges = starts.ranges;
     rangeError.textContent = starts.error;
     rangeError.classList.toggle('hidden', !starts.error);
     const waitingForConfirmation = chapterMode === 'ocr' && !ocrConfirmed;
@@ -260,6 +257,12 @@ async function buildThumbnailBrowser(bytes) {
   updateThumbnailSelection();
 }
 
+function outlineDefaultEnd(item, items) {
+  const next = items.filter((candidate) => candidate.page && candidate.page > item.page)
+    .sort((a, b) => a.page - b.page)[0];
+  return next ? next.page - 1 : pageCount;
+}
+
 function renderOutlineList() {
   if (!outlineList) return;
   outlineList.replaceChildren();
@@ -269,8 +272,16 @@ function renderOutlineList() {
     const label = document.createElement('label');
     label.className = 'outline-item';
     label.style.paddingLeft = `${12 + item.depth * 20}px`;
-    label.innerHTML = `<input type="checkbox" ${item.selected ? 'checked' : ''} /><span class="outline-title"></span><small>第 ${item.page} 页</small>`;
+    label.innerHTML = `<input type="checkbox" ${item.selected ? 'checked' : ''} /><span class="outline-title"></span><small>第 ${item.page} 页</small><input class="chapter-end-override" type="number" min="${item.page}" max="${pageCount}" aria-label="章节结束页" />`;
     label.querySelector('.outline-title').textContent = item.title;
+    const endInput = label.querySelector('.chapter-end-override');
+    endInput.value = item.end || outlineDefaultEnd(item, outlineItems);
+    endInput.placeholder = '结束页';
+    endInput.addEventListener('input', (event) => {
+      const end = Number(event.target.value);
+      item.end = Number.isInteger(end) && end >= item.page && end <= pageCount ? end : null;
+      updateSelection();
+    });
     label.querySelector('input').addEventListener('change', (event) => {
       item.selected = event.target.checked;
       updateSelection();
@@ -284,12 +295,15 @@ function renderOcrList() {
   ocrItems.forEach((item) => {
     const label = document.createElement('label');
     label.className = 'outline-item';
-    label.innerHTML = '<input type="checkbox" /><span class="outline-title"></span><small></small><input class="ocr-page-override" type="number" min="1" aria-label="章节 PDF 起始页" />';
+    label.innerHTML = '<input type="checkbox" /><span class="outline-title"></span><small></small><input class="ocr-page-override" type="number" min="1" aria-label="章节 PDF 起始页" /><input class="chapter-end-override" type="number" min="1" aria-label="章节结束页" />';
     label.querySelector('input[type="checkbox"]').checked = item.selected;
     label.querySelector('.outline-title').textContent = item.title;
     label.querySelector('small').textContent = `印刷第 ${item.printedPage} 页`;
     const pageInput = label.querySelector('.ocr-page-override');
     pageInput.value = item.page || '';
+    const endInput = label.querySelector('.chapter-end-override');
+    endInput.value = item.end || outlineDefaultEnd(item, ocrItems);
+    endInput.placeholder = '结束页';
     label.querySelector('input[type="checkbox"]').addEventListener('change', (event) => {
       item.selected = event.target.checked;
       ocrConfirmed = false;
@@ -299,10 +313,18 @@ function renderOcrList() {
     pageInput.addEventListener('input', (event) => {
       const page = Number(event.target.value);
       item.page = Number.isInteger(page) && page >= 1 && page <= pageCount ? page : null;
+      item.end = item.page && item.end >= item.page ? item.end : null;
       item.selected = Boolean(item.page);
       ocrConfirmed = false;
       ocrConfirmButton.disabled = true;
       label.querySelector('input[type="checkbox"]').checked = item.selected;
+      updateSelection();
+    });
+    endInput.addEventListener('input', (event) => {
+      const end = Number(event.target.value);
+      item.end = Number.isInteger(end) && end >= (item.page || 1) && end <= pageCount ? end : null;
+      ocrConfirmed = false;
+      ocrConfirmButton.disabled = true;
       updateSelection();
     });
     ocrList.appendChild(label);
@@ -514,7 +536,7 @@ async function generatePdf() {
     } else if (operation === 'chapter') {
       const parsed = chapterMode === 'manual'
         ? parseCutPoints(manualCutPoints.value, pageCount)
-        : { ranges: rangesFromChapterStarts((chapterMode === 'ocr' ? ocrItems : outlineItems).filter((item) => item.selected && item.page).map((item) => item.page), pageCount), error: '' };
+        : rangesFromChapterItems(chapterMode === 'ocr' ? ocrItems : outlineItems, pageCount);
       if (parsed.error || parsed.ranges.length < 2) throw new Error(parsed.error || 'At least two chapter starts are required');
       bytes = await createChapterZip(sourceBytes, parsed.ranges, sourceFile.name.replace(/\.pdf$/i, ''));
     } else if (operation === 'rotate') {
