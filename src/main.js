@@ -42,6 +42,7 @@ const ocrRunButton = $('#ocr-run-button');
 const ocrStatus = $('#ocr-status');
 const ocrList = $('#ocr-list');
 const ocrChapterPanel = $('#ocr-chapter-panel');
+const ocrConfirmButton = $('#ocr-confirm-button');
 const newPassword = $('#new-password');
 const confirmPassword = $('#confirm-password');
 const pageBrowser = $('#page-browser');
@@ -75,6 +76,7 @@ let splitOrder = 'ltr';
 let chapterMode = 'outline';
 let outlineItems = [];
 let ocrItems = [];
+let ocrConfirmed = false;
 let rendererHandle = null;
 let thumbnailObserver = null;
 let documentGeneration = 0;
@@ -113,8 +115,9 @@ function updateSelection() {
     const ranges = chapterMode === 'manual' ? starts.ranges : rangesFromChapterStarts(starts.starts, pageCount);
     rangeError.textContent = starts.error;
     rangeError.classList.toggle('hidden', !starts.error);
-    processButton.disabled = Boolean(starts.error) || ranges.length < 2;
-    selectionSummary.textContent = starts.error ? '请修正切割点后继续' : ranges.length < 2 ? '至少需要两个章节起始点才能切割' : `将生成 ${ranges.length} 个章节 PDF，并打包为 ZIP`;
+    const waitingForConfirmation = chapterMode === 'ocr' && !ocrConfirmed;
+    processButton.disabled = Boolean(starts.error) || ranges.length < 2 || waitingForConfirmation;
+    selectionSummary.textContent = starts.error ? '请修正切割点后继续' : ranges.length < 2 ? '至少需要两个章节起始点才能切割' : waitingForConfirmation ? '请先确认 OCR 识别出的章节定位' : `将生成 ${ranges.length} 个章节 PDF，并打包为 ZIP`;
     return;
   }
   const { pages, error } = parsePageRange(pageRange.value, pageCount);
@@ -289,12 +292,16 @@ function renderOcrList() {
     pageInput.value = item.page || '';
     label.querySelector('input[type="checkbox"]').addEventListener('change', (event) => {
       item.selected = event.target.checked;
+      ocrConfirmed = false;
+      ocrConfirmButton.disabled = !ocrItems.some((candidate) => candidate.selected && candidate.page);
       updateSelection();
     });
     pageInput.addEventListener('input', (event) => {
       const page = Number(event.target.value);
       item.page = Number.isInteger(page) && page >= 1 && page <= pageCount ? page : null;
       item.selected = Boolean(item.page);
+      ocrConfirmed = false;
+      ocrConfirmButton.disabled = true;
       label.querySelector('input[type="checkbox"]').checked = item.selected;
       updateSelection();
     });
@@ -335,13 +342,17 @@ async function runOcrChapterDetection() {
     });
     const mapping = mapPrintedPagesToPdf(pageResults);
     ocrItems = parsedToc.map((item) => ({ ...item, page: mapping.get(item.printedPage) || null, selected: Boolean(mapping.get(item.printedPage)) }));
+    ocrConfirmed = false;
     renderOcrList();
+    ocrConfirmButton.disabled = !ocrItems.some((item) => item.selected && item.page);
     ocrStatus.textContent = `完成：目录 ${ocrItems.length} 项，定位到 ${ocrItems.filter((item) => item.page).length} 项。未定位项目可手动切割。`;
     updateSelection();
   } catch (error) {
     console.error(error);
     ocrStatus.textContent = error.message || 'OCR 失败，请改用手动切割。';
     ocrItems = [];
+    ocrConfirmed = false;
+    ocrConfirmButton.disabled = true;
     ocrList.replaceChildren();
     updateSelection();
   } finally {
@@ -436,6 +447,11 @@ async function loadFile(file, password = '') {
     selectedPages = new Set();
     pageOrder = Array.from({ length: pageCount }, (_, index) => index + 1);
     selectionAnchor = null;
+    ocrItems = [];
+    ocrConfirmed = false;
+    ocrStatus.textContent = '';
+    ocrList.replaceChildren();
+    ocrConfirmButton.disabled = true;
     outlineItems = (await readPdfOutline(sourceBytes)).map((item) => ({ ...item, selected: true }));
     renderOutlineList();
     await buildThumbnailBrowser(sourceBytes);
@@ -547,6 +563,13 @@ chapterModeButtons.forEach((button) => button.addEventListener('click', () => {
   updateSelection();
 }));
 ocrRunButton.addEventListener('click', runOcrChapterDetection);
+ocrConfirmButton.addEventListener('click', () => {
+  const starts = ocrItems.filter((item) => item.selected && item.page).map((item) => item.page);
+  if (starts.length < 2) return;
+  ocrConfirmed = true;
+  ocrStatus.textContent = `已确认 ${starts.length} 个章节起始页，可以执行切割。`;
+  updateSelection();
+});
 manualCutPoints.addEventListener('input', updateSelection);
 newPassword.addEventListener('input', updateSelection);
 confirmPassword.addEventListener('input', updateSelection);

@@ -131,6 +131,7 @@
               <p class="input-help">先识别目录中的章节名和印刷页码，再扫描正文页眉/页脚建立印刷页码到 PDF 页码的映射。PDF 只在本地处理。</p>
               <p id="ocr-status" class="ocr-status" aria-live="polite"></p>
               <div id="ocr-list" class="outline-list"></div>
+              <button id="ocr-confirm-button" class="button secondary ocr-confirm-button" type="button" disabled>确认章节定位</button>
             </div>
             <div id="manual-cut-points" class="manual-cut-points hidden"><label for="manual-cut-input">章节起始页</label><input id="manual-cut-input" type="text" placeholder="例如 1, 18, 42, 79" aria-describedby="manual-cut-help" /><p id="manual-cut-help" class="input-help">输入每个章节的起始页；工具会自动补上第 1 页，并把每个起始页切到下一个起始页之前。</p></div>
           </div>
