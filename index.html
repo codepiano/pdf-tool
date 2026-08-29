@@ -122,9 +122,16 @@
           </div>
 
           <div class="chapter-panel hidden" id="chapter-panel">
-            <div class="chapter-panel-heading"><div><strong>章节来源</strong><small>目录页码和手动切割点都是 PDF 阅读器页码</small></div><div class="choice-row" role="group" aria-label="章节来源"><button class="choice-button active" data-chapter-mode="outline" type="button" aria-pressed="true">读取 PDF 目录</button><button class="choice-button" data-chapter-mode="manual" type="button" aria-pressed="false">手动切割点</button></div></div>
+            <div class="chapter-panel-heading"><div><strong>章节来源</strong><small>目录页码和手动切割点都是 PDF 阅读器页码</small></div><div class="choice-row" role="group" aria-label="章节来源"><button class="choice-button active" data-chapter-mode="outline" type="button" aria-pressed="true">读取 PDF 目录</button><button class="choice-button" data-chapter-mode="ocr" type="button" aria-pressed="false">OCR 扫描目录</button><button class="choice-button" data-chapter-mode="manual" type="button" aria-pressed="false">手动切割点</button></div></div>
             <div id="outline-list" class="outline-list"></div>
             <p id="outline-empty" class="outline-empty hidden">没有找到可定位到页面的 PDF 目录，请切换到“手动切割点”。</p>
+            <div id="ocr-chapter-panel" class="ocr-chapter-panel hidden">
+              <label for="ocr-toc-pages">目录所在的 PDF 页</label>
+              <div class="ocr-input-row"><input id="ocr-toc-pages" type="text" value="1-3" placeholder="例如 1-3, 8" /><button id="ocr-run-button" class="button secondary" type="button">开始 OCR</button></div>
+              <p class="input-help">先识别目录中的章节名和印刷页码，再扫描正文页眉/页脚建立印刷页码到 PDF 页码的映射。PDF 只在本地处理。</p>
+              <p id="ocr-status" class="ocr-status" aria-live="polite"></p>
+              <div id="ocr-list" class="outline-list"></div>
+            </div>
             <div id="manual-cut-points" class="manual-cut-points hidden"><label for="manual-cut-input">章节起始页</label><input id="manual-cut-input" type="text" placeholder="例如 1, 18, 42, 79" aria-describedby="manual-cut-help" /><p id="manual-cut-help" class="input-help">输入每个章节的起始页；工具会自动补上第 1 页，并把每个起始页切到下一个起始页之前。</p></div>
           </div>
 

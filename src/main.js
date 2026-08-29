@@ -5,6 +5,7 @@ import { movePageBefore } from './pdf/page-order.js';
 import { rotatePdfPages } from './pdf/page-transform.js';
 import { enhanceScannedPages, splitDoublePages } from './pdf/scan-processing.js';
 import { createChapterZip, parseCutPoints, rangesFromChapterStarts } from './pdf/chapter-splitting.js';
+import { createPageNumberOcrWorker, createTocOcrWorker, mapPrintedPagesToPdf, parseTocLines, recognizePageNumbers, recognizePageText } from './pdf/page-number-ocr.js';
 import './style.css';
 
 const $ = (selector) => document.querySelector(selector);
@@ -36,6 +37,11 @@ const outlineList = $('#outline-list');
 const outlineEmpty = $('#outline-empty');
 const manualCutPointPanel = $('#manual-cut-points');
 const manualCutPoints = $('#manual-cut-input');
+const ocrTocPages = $('#ocr-toc-pages');
+const ocrRunButton = $('#ocr-run-button');
+const ocrStatus = $('#ocr-status');
+const ocrList = $('#ocr-list');
+const ocrChapterPanel = $('#ocr-chapter-panel');
 const newPassword = $('#new-password');
 const confirmPassword = $('#confirm-password');
 const pageBrowser = $('#page-browser');
@@ -68,6 +74,7 @@ let rotationAngle = 90;
 let splitOrder = 'ltr';
 let chapterMode = 'outline';
 let outlineItems = [];
+let ocrItems = [];
 let rendererHandle = null;
 let thumbnailObserver = null;
 let documentGeneration = 0;
@@ -100,7 +107,9 @@ function updateSelection() {
   if (operation === 'chapter') {
     const starts = chapterMode === 'manual'
       ? parseCutPoints(manualCutPoints.value, pageCount)
-      : { starts: outlineItems.filter((item) => item.selected && item.page).map((item) => item.page), ranges: [], error: '' };
+      : chapterMode === 'ocr'
+        ? { starts: ocrItems.filter((item) => item.selected && item.page).map((item) => item.page), ranges: [], error: '' }
+        : { starts: outlineItems.filter((item) => item.selected && item.page).map((item) => item.page), ranges: [], error: '' };
     const ranges = chapterMode === 'manual' ? starts.ranges : rangesFromChapterStarts(starts.starts, pageCount);
     rangeError.textContent = starts.error;
     rangeError.classList.toggle('hidden', !starts.error);
@@ -267,6 +276,81 @@ function renderOutlineList() {
   });
 }
 
+function renderOcrList() {
+  ocrList.replaceChildren();
+  ocrItems.forEach((item) => {
+    const label = document.createElement('label');
+    label.className = 'outline-item';
+    label.innerHTML = '<input type="checkbox" /><span class="outline-title"></span><small></small><input class="ocr-page-override" type="number" min="1" aria-label="章节 PDF 起始页" />';
+    label.querySelector('input[type="checkbox"]').checked = item.selected;
+    label.querySelector('.outline-title').textContent = item.title;
+    label.querySelector('small').textContent = `印刷第 ${item.printedPage} 页`;
+    const pageInput = label.querySelector('.ocr-page-override');
+    pageInput.value = item.page || '';
+    label.querySelector('input[type="checkbox"]').addEventListener('change', (event) => {
+      item.selected = event.target.checked;
+      updateSelection();
+    });
+    pageInput.addEventListener('input', (event) => {
+      const page = Number(event.target.value);
+      item.page = Number.isInteger(page) && page >= 1 && page <= pageCount ? page : null;
+      item.selected = Boolean(item.page);
+      label.querySelector('input[type="checkbox"]').checked = item.selected;
+      updateSelection();
+    });
+    ocrList.appendChild(label);
+  });
+}
+
+async function runOcrChapterDetection() {
+  if (!sourceBytes || !pageCount) return;
+  const toc = parsePageRange(ocrTocPages.value, pageCount);
+  if (toc.error || !toc.pages.length) {
+    ocrStatus.textContent = toc.error || '请输入目录所在的 PDF 页。';
+    return;
+  }
+  ocrRunButton.disabled = true;
+  ocrStatus.textContent = '正在加载本地 OCR…';
+  let worker;
+  let tocWorker;
+  try {
+    tocWorker = await createTocOcrWorker((message) => {
+      if (message.status) ocrStatus.textContent = `OCR 引擎：${message.status}`;
+    });
+    const tocTexts = [];
+    for (let index = 0; index < toc.pages.length; index += 1) {
+      ocrStatus.textContent = `正在识别目录 ${index + 1} / ${toc.pages.length} 页…`;
+      tocTexts.push(await recognizePageText(tocWorker, sourceBytes, toc.pages[index]));
+    }
+    const parsedToc = tocTexts.flatMap((item) => parseTocLines(item.text));
+    if (!parsedToc.length) throw new Error('没有从目录中识别出“章节名 + 页码”，请调整目录页范围或改用手动切割。');
+    await tocWorker.terminate();
+    tocWorker = null;
+    worker = await createPageNumberOcrWorker((message) => {
+      if (message.status) ocrStatus.textContent = `OCR 引擎：${message.status}`;
+    });
+    const pages = Array.from({ length: pageCount }, (_, index) => index + 1);
+    const pageResults = await recognizePageNumbers(worker, sourceBytes, pages, ['footer', 'header'], (current, total) => {
+      ocrStatus.textContent = `正在扫描正文页码 ${current} / ${total} 页…`;
+    });
+    const mapping = mapPrintedPagesToPdf(pageResults);
+    ocrItems = parsedToc.map((item) => ({ ...item, page: mapping.get(item.printedPage) || null, selected: Boolean(mapping.get(item.printedPage)) }));
+    renderOcrList();
+    ocrStatus.textContent = `完成：目录 ${ocrItems.length} 项，定位到 ${ocrItems.filter((item) => item.page).length} 项。未定位项目可手动切割。`;
+    updateSelection();
+  } catch (error) {
+    console.error(error);
+    ocrStatus.textContent = error.message || 'OCR 失败，请改用手动切割。';
+    ocrItems = [];
+    ocrList.replaceChildren();
+    updateSelection();
+  } finally {
+    await tocWorker?.terminate();
+    await worker?.terminate();
+    ocrRunButton.disabled = false;
+  }
+}
+
 function setOperation(nextOperation) {
   operation = nextOperation;
   document.querySelectorAll('.operation').forEach((button) => {
@@ -287,6 +371,7 @@ function setOperation(nextOperation) {
   passwordPanel.classList.toggle('hidden', operation !== 'protect');
   scanPanel.classList.toggle('hidden', operation !== 'enhance');
   chapterPanel.classList.toggle('hidden', operation !== 'chapter');
+  ocrChapterPanel.classList.toggle('hidden', operation !== 'chapter' || chapterMode !== 'ocr');
   rangeLabel.textContent = operation === 'extract' ? '要提取哪些页？' : operation === 'rotate' ? '要旋转哪些页？' : operation === 'split' ? '要切开哪些页？' : operation === 'enhance' ? '要优化哪些扫描页？' : '要删除哪些页？';
   processButton.innerHTML = operation === 'extract'
     ? '生成新 PDF <span aria-hidden="true">→</span>'
@@ -413,7 +498,7 @@ async function generatePdf() {
     } else if (operation === 'chapter') {
       const parsed = chapterMode === 'manual'
         ? parseCutPoints(manualCutPoints.value, pageCount)
-        : { ranges: rangesFromChapterStarts(outlineItems.filter((item) => item.selected && item.page).map((item) => item.page), pageCount), error: '' };
+        : { ranges: rangesFromChapterStarts((chapterMode === 'ocr' ? ocrItems : outlineItems).filter((item) => item.selected && item.page).map((item) => item.page), pageCount), error: '' };
       if (parsed.error || parsed.ranges.length < 2) throw new Error(parsed.error || 'At least two chapter starts are required');
       bytes = await createChapterZip(sourceBytes, parsed.ranges, sourceFile.name.replace(/\.pdf$/i, ''));
     } else if (operation === 'rotate') {
@@ -457,9 +542,11 @@ chapterModeButtons.forEach((button) => button.addEventListener('click', () => {
   });
   outlineList.classList.toggle('hidden', chapterMode !== 'outline');
   outlineEmpty.classList.toggle('hidden', chapterMode !== 'outline' || outlineItems.some((item) => item.page));
+  ocrChapterPanel.classList.toggle('hidden', chapterMode !== 'ocr');
   manualCutPointPanel.classList.toggle('hidden', chapterMode !== 'manual');
   updateSelection();
 }));
+ocrRunButton.addEventListener('click', runOcrChapterDetection);
 manualCutPoints.addEventListener('input', updateSelection);
 newPassword.addEventListener('input', updateSelection);
 confirmPassword.addEventListener('input', updateSelection);
