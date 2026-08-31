@@ -2,3 +2,4 @@ node_modules/
 dist/
 .control-panel/
 .omx/
+.DS_Store
