@@ -55,20 +55,17 @@
             <button class="operation" data-operation="split" type="button" role="tab" aria-selected="false">
               <span class="operation-number">04</span><span><strong>切开双页扫描</strong><small>把每一张横向双页切成左右两页</small></span>
             </button>
-            <button class="operation" data-operation="reorder" type="button" role="tab" aria-selected="false">
-              <span class="operation-number">05</span><span><strong>调整页面顺序</strong><small>拖拽页面重新排序，或将整本书倒序</small></span>
-            </button>
             <button class="operation" data-operation="rotate" type="button" role="tab" aria-selected="false">
-              <span class="operation-number">06</span><span><strong>旋转页面</strong><small>将指定页面无损旋转 90°、180° 或 270°</small></span>
+              <span class="operation-number">05</span><span><strong>旋转页面</strong><small>将指定页面无损旋转 90°、180° 或 270°</small></span>
             </button>
             <button class="operation" data-operation="protect" type="button" role="tab" aria-selected="false">
-              <span class="operation-number">07</span><span><strong>添加密码保护</strong><small>为新副本设置打开密码</small></span>
+              <span class="operation-number">06</span><span><strong>添加密码保护</strong><small>为新副本设置打开密码</small></span>
             </button>
             <button class="operation" data-operation="enhance" type="button" role="tab" aria-selected="false">
-              <span class="operation-number">08</span><span><strong>优化扫描页</strong><small>裁剪白边，调整亮度、对比度与灰度</small></span>
+              <span class="operation-number">07</span><span><strong>优化扫描页</strong><small>裁剪白边，调整亮度、对比度与灰度</small></span>
             </button>
             <button class="operation" data-operation="chapter" type="button" role="tab" aria-selected="false">
-              <span class="operation-number">09</span><span><strong>按章节切割</strong><small>读取 PDF 目录，或手动输入章节起始页</small></span>
+              <span class="operation-number">08</span><span><strong>按章节切割</strong><small>读取 PDF 目录，或手动输入章节起始页</small></span>
             </button>
           </div>
 
@@ -82,7 +79,7 @@
               <p id="range-help" class="input-help">用英文逗号分隔；连续页可用连字符，例如 <code>1, 3-5, 8</code>。</p>
               <p id="range-error" class="input-error hidden" role="alert"></p>
             </div>
-            <aside class="page-context"><span>共 <b id="total-pages">0</b> 页</span><button type="button" id="select-all-button">全部选择</button></aside>
+            <aside class="page-context"><span>共 <b id="total-pages">0</b> 页</span></aside>
           </div>
 
           <div class="split-notice hidden" id="split-notice">
@@ -135,15 +132,6 @@
             </div>
             <div id="manual-cut-points" class="manual-cut-points hidden"><label for="manual-cut-input">章节起始页</label><input id="manual-cut-input" type="text" placeholder="例如 1, 18, 42, 79" aria-describedby="manual-cut-help" /><p id="manual-cut-help" class="input-help">输入每个章节的起始页；工具会自动补上第 1 页，并把每个起始页切到下一个起始页之前。</p></div>
           </div>
-
-          <section class="page-browser hidden" id="page-browser" aria-labelledby="page-browser-title">
-            <header class="page-browser-header">
-              <div><h3 id="page-browser-title">页面预览</h3><p id="page-browser-help">点击选择页面，按住 Shift 可连续选择</p></div>
-              <div class="page-browser-actions" id="selection-actions"><span id="selected-count">已选 0 页</span><button id="clear-selection-button" type="button">清除</button></div>
-              <div class="page-browser-actions hidden" id="reorder-actions"><button id="reverse-pages-button" type="button">全部倒序</button><button id="reset-order-button" type="button">恢复原顺序</button></div>
-            </header>
-            <div class="thumbnail-grid" id="thumbnail-grid" role="group" aria-label="PDF 页面缩略图"></div>
-          </section>
 
           <div class="result-bar">
             <p id="selection-summary">输入页码以继续</p>

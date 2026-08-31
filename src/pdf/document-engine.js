@@ -99,22 +99,6 @@ export async function readPdfOutline(bytes) {
   }
 }
 
-export async function renderPageThumbnail(pdfDocument, pageNumber, maxWidth = 132) {
-  const page = await pdfDocument.getPage(pageNumber);
-  const initialViewport = page.getViewport({ scale: 1 });
-  const scale = Math.min(1.5, maxWidth / initialViewport.width);
-  const viewport = page.getViewport({ scale });
-  const canvas = document.createElement('canvas');
-  canvas.width = Math.max(1, Math.round(viewport.width));
-  canvas.height = Math.max(1, Math.round(viewport.height));
-  const context = canvas.getContext('2d', { alpha: false });
-  context.fillStyle = '#ffffff';
-  context.fillRect(0, 0, canvas.width, canvas.height);
-  await page.render({ canvasContext: context, viewport }).promise;
-  page.cleanup();
-  return canvas;
-}
-
 export async function createPageSubset(bytes, pageIndices) {
   const source = await PDFDocument.load(bytes);
   const output = await PDFDocument.create();
