@@ -1,6 +1,6 @@
 // Detection is separate from PDF mutation so a reviewed plan is the only input
 // to export. Coordinates throughout are MuPDF page coordinates (top-left).
-export const compactText = (text) => text.replace(/\s+/gu, '');
+export const compactText = (text) => text.normalize('NFKC').replace(/\\_/gu, '_').replace(/[\s\u00ad\u200b\ufeff]+/gu, '');
 const overlaps = (a, b) => a[0] < b[2] && a[2] > b[0] && a[1] < b[3] && a[3] > b[1];
 const rectOf = (q) => [Math.min(q[0], q[2], q[4], q[6]), Math.min(q[1], q[3], q[5], q[7]), Math.max(q[0], q[2], q[4], q[6]), Math.max(q[1], q[3], q[5], q[7])];
 
@@ -27,7 +27,23 @@ export function protectedCharacters(chars) {
   chars.forEach((char, i) => {
     if (/^[\s\-–—·()[\]（）]+$/u.test(char.text)) result.add(i);
   });
+  // Numbers inside a complete download attribution identify a resource and a
+  // download date, not the printed page. Bound the exception at the date so a
+  // neighboring page number is never included. Works across extracted lines.
+  const downloadNotice = /\bDownloaded\s+from\s+[\s\S]*?\s+by\s+[\s\S]*?\s+on\s+\d{1,2}\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4}\b/giu;
+  for (const match of text.matchAll(downloadNotice)) {
+    for (let i = match.index; i < match.index + match[0].length; i++) result.delete(map[i]);
+  }
   return result;
+}
+
+function regionLines(lines) {
+  return ['header', 'footer'].flatMap((region) => {
+    const items = lines.filter((line) => line.region === region).sort((a, b) => a.bbox[1] - b.bbox[1] || a.bbox[0] - b.bbox[0]);
+    if (!items.length) return [];
+    const chars = items.flatMap((line, i) => i ? [{ text: ' ' }, ...line.chars] : line.chars);
+    return [{ ...items[0], chars, protected: protectedCharacters(chars) }];
+  });
 }
 
 export function inspectPage(page, number, { margin = 12, region = 'both' } = {}) {
@@ -83,11 +99,16 @@ export function inspectPage(page, number, { margin = 12, region = 'both' } = {})
 
 export function pageCandidates(page, targets) {
   const candidates = [];
-  for (const [lineIndex, line] of page.lines.entries()) {
+  const regions = regionLines(page.lines);
+  // Share the context-aware protection with automatic inference and preview.
+  const protectedGlyphs = new Set(regions.flatMap((line) => line.chars.filter((c, i) => line.protected.has(i))));
+  page.protected = regions.flatMap((line) => line.chars.filter((c) => c.rect && c.text.trim() && protectedGlyphs.has(c)).map((c) => c.rect));
+  const lines = targets.length ? regions : page.lines.map((line) => ({ ...line, protected: new Set(line.chars.map((c, i) => protectedGlyphs.has(c) ? i : -1).filter((i) => i >= 0)) }));
+  for (const [lineIndex, line] of lines.entries()) {
     const map = [];
     let text = '';
     line.chars.forEach((char, index) => {
-      for (const unit of char.text.split('')) if (!/\s/u.test(unit)) { text += unit; map.push(index); }
+      for (const unit of compactText(char.text).split('')) { text += unit; map.push(index); }
     });
     const hits = [];
     if (targets.length) {
@@ -116,7 +137,8 @@ export function pageCandidates(page, targets) {
         page.warning = '部分匹配与页码或其他文字无法可靠分离，已保留';
         continue;
       }
-      candidates.push({ id: `${page.number}:${lineIndex}:${hitIndex}`, page: page.number, label: hit.label, region: line.region, y: line.y, rects: [...chosen].map((c) => c.rect), cuts });
+      const y = (Math.min(...[...chosen].map((c) => c.rect[1])) - page.bounds[1]) / (page.bounds[3] - page.bounds[1]);
+      candidates.push({ id: `${page.number}:${lineIndex}:${hitIndex}`, page: page.number, label: hit.label, region: line.region, y, rects: [...chosen].map((c) => c.rect), cuts });
     }
   }
   return candidates;

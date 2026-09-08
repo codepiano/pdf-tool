@@ -176,3 +176,36 @@ test('a full-page scan with a text overlay is skipped', async () => {
   assert.match(plan.pages[0].warning, /扫描图/);
   doc.destroy(); pixmap.destroy(); page.destroy(); source.destroy();
 });
+
+test('MIT download attribution matches across lines, removing URL and date numbers but preserving page numbers', async () => {
+  const notice = 'Downloaded from direct. mit. edu/ books/ oa-monograph-pdf/ 2259328/ book\\_9780262342964. pdf by guest on 08 September 2026';
+  const file = await PDFDocument.create();
+  for (let n = 1; n <= 6; n++) {
+    const p = file.addPage([600, 800]);
+    p.drawText('Body stays here', { x: 40, y: 400, size: 14 });
+    if (n <= 3) {
+      p.drawText(notice.replace('\\_', '_'), { x: 40, y: 30, size: 6 });
+    } else {
+    p.drawText('Downloaded from direct.mit.edu/books/oa-monograph-pdf/2259328/', { x: 40, y: 42, size: 8 });
+    p.drawText('book_9780262342964.pdf by guest on 08 September 2026', { x: 40, y: 30, size: 8 });
+    }
+    p.drawText(`Page ${n} of 6`, { x: 480, y: 30, size: 8 });
+  }
+  const pdf = mupdf.Document.openDocument(await file.save(), 'application/pdf');
+  const plan = analyze(pdf, [notice]);
+  assert.equal(plan.candidates.length, 6);
+  assert.deepEqual(plan.unmatched, []);
+  // Automatic inference also removes the resource identifiers and date.
+  const automatic = analyze(pdf);
+  assert.equal(automatic.candidates.length, 9);
+  for (let n = 1; n <= 6; n++) {
+    const page = pdf.loadPage(n - 1);
+    applyPageRemovals(page, plan.candidates.filter(c => c.page === n), mupdf);
+    const value = text(page);
+    assert.ok(value.includes(`Page ${n} of 6`));
+    assert.ok(value.includes('Body stays here'));
+    assert.ok(!/Downloaded|2259328|9780262342964|September|2026/.test(value));
+    page.destroy();
+  }
+  pdf.destroy();
+});
