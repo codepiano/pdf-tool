@@ -67,6 +67,9 @@
             <button class="operation" data-operation="chapter" type="button" role="tab" aria-selected="false">
               <span class="operation-number">08</span><span><strong>按章节切割</strong><small>读取 PDF 目录，或手动输入章节起始页</small></span>
             </button>
+            <button class="operation" data-operation="header-footer" type="button" role="tab" aria-selected="false">
+              <span class="operation-number">09</span><span><strong>移除页眉页脚</strong><small>移除文字版 PDF 的重复文字，保留页码</small></span>
+            </button>
           </div>
 
           <div class="editor-area" id="range-editor">
@@ -132,6 +135,29 @@
             </div>
             <div id="manual-cut-points" class="manual-cut-points hidden"><label for="manual-cut-input">章节起始页</label><input id="manual-cut-input" type="text" placeholder="例如 1, 18, 42, 79" aria-describedby="manual-cut-help" /><p id="manual-cut-help" class="input-help">输入每个章节的起始页；工具会自动补上第 1 页，并把每个起始页切到下一个起始页之前。</p></div>
           </div>
+
+          <section class="hf-panel hidden" id="header-footer-panel" aria-label="移除页眉页脚设置">
+            <label for="hf-text">要移除的文字（选填，每行一条）</label>
+            <textarea id="hf-text" rows="3" placeholder="例如：书名、章节名、网站名称"></textarea>
+            <p class="input-help">填写时按文字匹配，忽略空白、区分大小写；留空才自动推断至少重复 3 页的文字。只检查所选页边区域，默认保留页码及其他数字；无法可靠分离的内容会跳过。扫描页不处理。</p>
+            <div class="hf-controls">
+              <label for="hf-region">检查区域<select id="hf-region"><option value="both">页眉和页脚</option><option value="header">仅页眉</option><option value="footer">仅页脚</option></select></label>
+              <label for="hf-margin">顶部 / 底部范围<select id="hf-margin"><option value="8">各 8%</option><option value="12" selected>各 12%</option><option value="16">各 16%</option><option value="20">各 20%</option></select></label>
+              <button class="button secondary" id="hf-analyze" type="button">分析并抽样预览</button>
+              <button class="text-button hidden" id="hf-cancel" type="button">取消</button>
+            </div>
+            <p id="hf-status" role="status">填写要移除的文字，或留空自动推断，然后开始分析。</p>
+            <div id="hf-results" class="hidden">
+              <div id="hf-groups" class="hf-groups" aria-label="匹配文字，可取消整组"></div>
+              <p id="hf-warnings" class="input-help"></p>
+              <p class="input-help">扫描整份文档，默认抽取开头、中间、结尾约 6 页，并补充不同样式（最多 12 页）。每组均可单独查看样本。</p>
+              <div id="hf-samples" class="hf-samples" aria-label="抽样页面"></div>
+              <div class="hf-controls"><label for="hf-page">查看任意页<input id="hf-page" type="number" min="1" value="1" /></label><button id="hf-show-page" class="button secondary" type="button">查看</button><span class="hf-legend">红色：待移除 · 绿色：保留页码 / 数字</span></div>
+              <p id="hf-page-caption"></p>
+              <div id="hf-preview" class="hf-preview"></div>
+              <div id="hf-page-matches" class="hf-page-matches" aria-label="本页匹配，可逐项取消"></div>
+            </div>
+          </section>
 
           <div class="result-bar">
             <p id="selection-summary">输入页码以继续</p>

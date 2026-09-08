@@ -6,6 +6,7 @@ import { enhanceScannedPages, splitDoublePages } from './pdf/scan-processing.js'
 import { createChapterZip, parseCutPoints, rangesFromChapterItems } from './pdf/chapter-splitting.js';
 import { createPageNumberOcrWorker, createTocOcrWorker, mapPrintedPagesToPdf, parseTocLines, recognizePageNumbers, recognizePageText } from './pdf/page-number-ocr.js';
 import './style.css';
+import { createHeaderFooterPanel } from './header-footer-panel.js';
 
 const $ = (selector) => document.querySelector(selector);
 const fileInput = $('#file-input');
@@ -65,6 +66,7 @@ let chapterMode = 'outline';
 let outlineItems = [];
 let ocrItems = [];
 let ocrConfirmed = false;
+const headerFooter = createHeaderFooterPanel(updateSelection);
 
 function formatSize(bytes) {
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
@@ -72,6 +74,12 @@ function formatSize(bytes) {
 }
 
 function updateSelection() {
+  if (operation === 'header-footer') {
+    rangeError.classList.add('hidden');
+    processButton.disabled = !headerFooter.ready;
+    selectionSummary.textContent = headerFooter.summary();
+    return;
+  }
   if (operation === 'unlock') {
     rangeError.classList.add('hidden');
     processButton.disabled = false;
@@ -252,6 +260,7 @@ async function runOcrChapterDetection() {
 }
 
 function setOperation(nextOperation) {
+  if (headerFooter.busy && nextOperation !== operation) headerFooter.reset('操作已切换，请重新分析。');
   operation = nextOperation;
   document.querySelectorAll('.operation').forEach((button) => {
     const active = button.dataset.operation === operation;
@@ -265,9 +274,10 @@ function setOperation(nextOperation) {
   passwordPanel.classList.toggle('hidden', operation !== 'protect');
   scanPanel.classList.toggle('hidden', operation !== 'enhance');
   chapterPanel.classList.toggle('hidden', operation !== 'chapter');
+  $('#header-footer-panel').classList.toggle('hidden', operation !== 'header-footer');
   ocrChapterPanel.classList.toggle('hidden', operation !== 'chapter' || chapterMode !== 'ocr');
   rangeLabel.textContent = operation === 'extract' ? '要提取哪些页？' : operation === 'rotate' ? '要旋转哪些页？' : operation === 'split' ? '要切开哪些页？' : operation === 'enhance' ? '要优化哪些扫描页？' : '要删除哪些页？';
-  processButton.innerHTML = operation === 'extract'
+  processButton.innerHTML = operation === 'header-footer' ? '移除并生成新 PDF <span aria-hidden="true">→</span>' : operation === 'extract'
     ? '生成新 PDF <span aria-hidden="true">→</span>'
     : operation === 'delete'
       ? '删除并生成新 PDF <span aria-hidden="true">→</span>'
@@ -313,6 +323,8 @@ async function loadFile(file, password = '') {
     return;
   }
   try {
+    headerFooter.reset();
+    documentCard.classList.add('hidden');
     wasRestricted = false;
     const loadedPdf = await readPdfFile(file, password);
     sourceBytes = loadedPdf.bytes;
@@ -325,7 +337,6 @@ async function loadFile(file, password = '') {
     totalPages.textContent = pageCount;
     uploadCard.classList.add('hidden');
     passwordPrompt.classList.add('hidden');
-    documentCard.classList.remove('hidden');
     pageRange.value = '';
     selectedPages = new Set();
     ocrItems = [];
@@ -336,6 +347,7 @@ async function loadFile(file, password = '') {
     outlineItems = (await readPdfOutline(sourceBytes)).map((item) => ({ ...item, selected: true }));
     renderOutlineList();
     setOperation(wasRestricted ? 'unlock' : 'extract');
+    documentCard.classList.remove('hidden');
     if (!wasRestricted) pageRange.focus();
   } catch (error) {
     console.error(error);
@@ -365,7 +377,9 @@ async function generatePdf() {
   processButton.textContent = '正在生成…';
   try {
     let bytes;
-    if (operation === 'unlock') {
+    if (operation === 'header-footer') {
+      bytes = await headerFooter.export();
+    } else if (operation === 'unlock') {
       bytes = sourceBytes;
     } else if (operation === 'protect') {
       bytes = await protectPdf(sourceBytes, newPassword.value);
@@ -401,7 +415,7 @@ async function generatePdf() {
       bytes = await createPageSubset(sourceBytes, indices);
     }
     const stem = sourceFile.name.replace(/\.pdf$/i, '');
-    const suffix = operation === 'extract' ? '提取页' : operation === 'delete' ? '已删除页' : operation === 'unlock' ? '无使用限制' : operation === 'split' ? '双页已切开' : operation === 'rotate' ? '已旋转' : operation === 'protect' ? '已加密' : operation === 'enhance' ? '扫描已优化' : '已排序';
+    const suffix = operation === 'header-footer' ? '已移除页眉页脚' : operation === 'extract' ? '提取页' : operation === 'delete' ? '已删除页' : operation === 'unlock' ? '无使用限制' : operation === 'split' ? '双页已切开' : operation === 'rotate' ? '已旋转' : operation === 'protect' ? '已加密' : operation === 'enhance' ? '扫描已优化' : '已排序';
     const isChapterZip = operation === 'chapter';
     const blob = new Blob([bytes], { type: isChapterZip ? 'application/zip' : 'application/pdf' });
     const url = URL.createObjectURL(blob);
@@ -486,3 +500,4 @@ document.querySelectorAll('[data-split-order]').forEach((button) => button.addEv
 $('#deskew-left').addEventListener('click', () => changeDeskewAngle(-0.1));
 $('#deskew-right').addEventListener('click', () => changeDeskewAngle(0.1));
 processButton.addEventListener('click', generatePdf);
+$('#hf-analyze').addEventListener('click', () => headerFooter.analyze(sourceBytes));
