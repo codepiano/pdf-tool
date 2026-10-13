@@ -10,8 +10,8 @@
   "restartCommand": "./scripts/restart.sh",
   "uninstallCommand": "./scripts/uninstall.sh",
   "openHomepageCommand": "./scripts/open-homepage.sh",
-  "frontendUrl": "http://127.0.0.1:5180",
-  "notes": "本地 PDF 页面提取与删除工具，Vite 服务默认监听 127.0.0.1:5180",
+  "frontendUrl": "http://127.0.0.1:4315",
+  "notes": "本地 PDF 页面提取与删除工具，Vite 服务默认监听 127.0.0.1:4315",
   "scripts": {
     "init": "./scripts/init.sh",
     "install": "./scripts/install.sh",
@@ -21,5 +21,8 @@
     "restart": "./scripts/restart.sh",
     "uninstall": "./scripts/uninstall.sh",
     "openHomepage": "./scripts/open-homepage.sh"
-  }
+  },
+  "ports": [
+    4315
+  ]
 }

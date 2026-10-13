@@ -2,7 +2,7 @@
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SESSION_NAME="pdf-tool-vite"
-PORT="${PDF_TOOL_PORT:-5180}"
+PORT="${PDF_TOOL_PORT:-4315}"
 APP_URL="http://127.0.0.1:$PORT"
 
 project_server_pids() {
