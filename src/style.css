@@ -56,6 +56,9 @@ input:focus { border-color:var(--rust); box-shadow:0 0 0 3px rgba(200,84,50,.13)
 .input-help, .input-error { margin:8px 0 0; font-size:12px; line-height:1.6; }
 .input-help { color:var(--muted); } code { padding:1px 4px; background:#f0ede6; font-family:var(--mono); }
 .input-error { color:#b93723; }
+.page-presets { margin-top:12px; flex-wrap:wrap; }
+.page-presets .choice-button { padding:0 12px; }
+.choice-button:focus-visible { outline:2px solid var(--rust); outline-offset:3px; }
 .split-notice { display:flex; align-items:flex-start; gap:14px; margin:0 0 25px; padding:17px; border:1px solid #ead3c8; background:#fff8f3; }
 .split-glyph { flex:none; color:var(--rust); font:500 20px var(--mono); letter-spacing:-.24em; }
 .split-copy { flex:1; }.split-notice p { display:grid; gap:5px; margin:0; }.split-notice strong { font-size:14px; }.split-notice small { color:var(--muted); font-size:12px; line-height:1.65; }

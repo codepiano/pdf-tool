@@ -486,6 +486,13 @@ document.querySelectorAll('[data-rotation]').forEach((button) => button.addEvent
   updateSelection();
 }));
 pageRange.addEventListener('input', syncSelectionFromInput);
+document.querySelectorAll('[data-page-parity]').forEach((button) => button.addEventListener('click', () => {
+  const firstPage = button.dataset.pageParity === 'odd' ? 1 : 2;
+  const pages = [];
+  for (let page = firstPage; page <= pageCount; page += 2) pages.push(page);
+  pageRange.value = pages.join(', ');
+  syncSelectionFromInput();
+}));
 deskewAngle.addEventListener('input', () => { deskewValue.textContent = `${Number(deskewAngle.value).toFixed(1).replace('.0', '')}°`; updateSelection(); });
 splitPosition.addEventListener('input', () => { splitPositionValue.textContent = `${splitPosition.value}%`; updateSelection(); });
 document.querySelectorAll('[data-split-order]').forEach((button) => button.addEventListener('click', () => {

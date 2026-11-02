@@ -79,6 +79,11 @@
                 <input id="page-range" type="text" inputmode="text" autocomplete="off" placeholder="例如 1, 3-5, 8" aria-describedby="range-help range-error" />
                 <span class="page-unit">页</span>
               </div>
+              <div class="choice-row page-presets" role="group" aria-label="按奇偶选择 PDF 页面">
+                <button class="choice-button" data-page-parity="odd" type="button">选择奇数页</button>
+                <button class="choice-button" data-page-parity="even" type="button">选择偶数页</button>
+              </div>
+              <p class="input-help">按 PDF 阅读器中的页面序号选择（从第 1 页开始），会替换当前页码；删除操作会移除选中的页面。</p>
               <p id="range-help" class="input-help">用英文逗号分隔；连续页可用连字符，例如 <code>1, 3-5, 8</code>。</p>
               <p id="range-error" class="input-error hidden" role="alert"></p>
             </div>
